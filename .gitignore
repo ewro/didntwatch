@@ -1,0 +1,11 @@
+.venv/
+.cache/
+__pycache__/
+*.pyc
+
+# internal task brief — not part of the public skill
+tldw-task.md
+
+# OS / editor cruft
+.DS_Store
+.runtime
