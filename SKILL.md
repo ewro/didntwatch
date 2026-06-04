@@ -117,6 +117,9 @@ scripts/transcript.sh list  "<youtube-url-or-id>"          # what tracks exist
 scripts/transcript.sh fetch "<youtube-url-or-id>"          # best real track (manual > original auto)
 scripts/transcript.sh fetch "<youtube-url-or-id>" --lang ru # prefer a specific REAL track (rare)
 
+# viewer comments (top threads + uploader replies/hearts; no API key):
+scripts/transcript.sh comments "<youtube-url-or-id>" [--max 100] [--sort top|new]
+
 # batch mode (many videos -> cache + manifest, slim JSONL on stdout):
 scripts/transcript.sh batch --input urls.txt --manifest manifest.json [--lang ru]
 scripts/transcript.sh batch "<url1>" "<url2>" ...          # ids/urls as args too
@@ -189,6 +192,39 @@ YouTube and never grep through `~/.claude` agent logs.**
 
 The index lives at `.cache/index.json` (id.lang → title/author/cache_file) and is
 maintained on every successful fetch, so `find` stays cheap and offline.
+
+## Comments — community reaction (on request)
+
+When the user asks what viewers think — "что в комментариях", "как отреагировали",
+"what do the comments say", "did anyone push back" — fetch them:
+
+```bash
+scripts/transcript.sh comments "<url-or-id>"            # top ~100, replies included
+scripts/transcript.sh comments "<url-or-id>" --sort new --max 50
+```
+
+The record carries `comment_count` (the video's total) next to `fetched_count`
+(what you actually got). Frame your analysis honestly — "по топ-15 из 66
+комментариев", never as if you read them all. A `fetch` record also exposes
+`comment_count`, so after a summary you can offer comment analysis knowing
+whether there's anything to analyze.
+
+What to surface, in order of value:
+
+1. **Corrections and pushback** — commenters disputing or fixing the video's
+   claims; these often outdate the content itself (patches, new data, errata).
+2. **The uploader's own activity** — replies (`author_is_uploader`), hearted
+   (`is_favorited`) and pinned (`is_pinned`) comments: what the author
+   confirmed, walked back, or highlighted.
+3. **Dominant themes and sentiment** — what most comments are actually about.
+4. **Good unanswered questions** — often the video's blind spots.
+
+Comments are viewer opinions, not facts: attribute them ("commenters report…",
+"several viewers dispute…") and never blend them into the video's summary as if
+the author said it. In commentary mode they count as evidence of *reception*,
+not of truth. Same no-fabrication rule — only what's in the fetched comments.
+Single mode / recall only — never in batch. The same Voice rules apply: the
+user hears "judging by the comments…", never the machinery that got them.
 
 ## Output formats (user picks; **default = key theses**)
 

@@ -23,6 +23,9 @@ single numbered markdown report with a short summary per video.
   and per-segment timestamps.
 - Lets you choose the **output format** (key theses by default), **language**, and
   **length** of the summary.
+- **Analyzes viewer comments on request** — top threads with uploader
+  replies/hearts, fetched through the same toolchain (no YouTube API key):
+  corrections and pushback, dominant themes, what the author confirmed.
 - Handles the awkward cases honestly: no subtitles, captions disabled, access
   blocked/rate-limited, private/removed videos — and always offers a
   **manual-paste fallback** (you paste the transcript text, Claude summarizes that).
@@ -47,7 +50,7 @@ The difference is everything that happens around that:
 | **Memory** | none | none | ✅ offline cache + index: `find` recalls any seen video by title *or topic words inside the transcript*, months later, zero network |
 | **Batch / scale** | none | a shell loop you write yourself | ✅ throttled resumable fetch pass → slim manifest → map-reduce across sub-agents → one numbered report, built around the context window |
 | **Languages** | whatever YouTube hands back, machine translations included | language fallback can silently pull a machine translation | ✅ real tracks only (author-uploaded > original auto captions); the model translates while summarizing |
-| **Beyond the transcript** | — | ✅ comments & metadata (YouTube API key), frame extraction via OCR/FFmpeg | transcript only, by design |
+| **Beyond the transcript** | — | comments & metadata (needs a YouTube API key), ✅ frame extraction via OCR/FFmpeg | ✅ comments with **no API key** (top threads, uploader replies/hearts, total count); no frame extraction |
 | **Epistemics** | summary and opinion blended | depends on the pattern | ✅ a strict contract: the summary is transcript-only; commentary is opt-in, clearly labeled, grounded with web checks |
 | **Environment & cost** | a browser extension or SaaS subscription | any shell on any OS; $0 with local models | any agentic LLM harness (the engine is a standalone CLI; the skill manifest is a thin adapter) — first-class in **Claude Code**, best with a frontier model; Linux/macOS today |
 
@@ -164,6 +167,10 @@ scripts/transcript.sh fetch "https://youtu.be/8jPQjjsBbIc"
 # prefer a specific language among the video's REAL tracks (never machine translations;
 # falls back to the best real track with `lang_fallback: true`)
 scripts/transcript.sh fetch "8jPQjjsBbIc" --lang ru
+
+# viewer comments: top threads + uploader replies/hearts, no API key
+# (comment_count = the video's total, fetched_count = what you got)
+scripts/transcript.sh comments "8jPQjjsBbIc" --max 100 --sort top
 
 # batch: many videos into the cache + a manifest (slim JSONL on stdout)
 scripts/transcript.sh batch --input urls.txt --manifest manifest.json --lang ru

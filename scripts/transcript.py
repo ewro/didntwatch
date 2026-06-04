@@ -9,6 +9,7 @@ the transcript this script returns.
 Modes:
   list  <url|id>              -> available subtitle tracks
   fetch <url|id> [--lang xx]  -> one transcript (text + timestamped segments)
+  comments <url|id>           -> viewer comments via InnerTube (no API key)
   batch [targets...]          -> many transcripts into the cache + a manifest
 
 `fetch`/`list` print a single JSON object to stdout. `batch` prints one slim
@@ -172,7 +173,8 @@ def cmd_reindex() -> dict:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if data.get("status") != "ok" or not data.get("video_id"):
+        # Transcripts only — comments caches share the id prefix but have no text.
+        if data.get("status") != "ok" or not data.get("video_id") or "text" not in data:
             continue
         data["cache_file"] = str(path)
         vid = data["video_id"]
@@ -332,7 +334,11 @@ def _read_cache(video_id: str, lang: str | None) -> dict | None:
     if lang:
         candidates = [CACHE_DIR / f"{video_id}.{lang}.json"]
     else:
-        candidates = sorted(CACHE_DIR.glob(f"{video_id}.*.json"))
+        # Skip the comments cache — same id prefix, but not a transcript.
+        candidates = sorted(
+            p for p in CACHE_DIR.glob(f"{video_id}.*.json")
+            if not p.name.endswith(".comments.json")
+        )
     for path in candidates:
         if not path.is_file():
             continue
@@ -733,6 +739,9 @@ def _build_ok(
         "is_generated": is_generated,
         "available_tracks": _available_tracks(info),
         "segment_count": len(segments),
+        # Total comments on the video, straight from the same info.json (no
+        # extra request); null when YouTube didn't report it.
+        "comment_count": info.get("comment_count"),
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     if requested and fallback:
@@ -796,6 +805,99 @@ def cmd_list(video_id: str) -> dict:
             }
     status, message = _classify_stderr(proc.stderr)
     return {"status": status, "video_id": video_id, "message": message}
+
+
+# --- comments ----------------------------------------------------------------
+
+# What we keep per comment: enough for analysis (who said it, how the community
+# and the uploader reacted, thread structure), none of the avatar/id noise.
+_COMMENT_FIELDS = (
+    "id",
+    "parent",
+    "text",
+    "author",
+    "like_count",
+    "author_is_uploader",
+    "is_pinned",
+    "is_favorited",
+)
+
+
+def _slim_comment(c: dict) -> dict:
+    out = {k: c.get(k) for k in _COMMENT_FIELDS}
+    out["time"] = c.get("_time_text")
+    return out
+
+
+def cmd_comments(video_id: str, max_comments: int, sort: str) -> dict:
+    """Fetch viewer comments via yt-dlp's InnerTube client — no API key.
+
+    Returns a slim record (text, author, likes, uploader replies/hearts, pinned,
+    thread structure) and caches it to `.cache/<id>.comments.json`. The video's
+    total `comment_count` comes from the same info.json — no extra request.
+    """
+    with tempfile.TemporaryDirectory(prefix="tldw-") as tmp:
+        outdir = Path(tmp)
+        extra = [
+            "--skip-download",
+            "--ignore-no-formats-error",
+            "--no-warnings",
+            "--write-info-json",
+            "--write-comments",
+            "--extractor-args",
+            f"youtube:comment_sort={sort};max_comments={max_comments},all,all,10",
+            "-o",
+            str(outdir / "%(id)s.%(ext)s"),
+            f"https://youtu.be/{video_id}",
+        ]
+        # Comment threads are paginated and can be slow on busy videos.
+        proc = _run_ytdlp(extra, timeout=300.0)
+        info: dict = {}
+        info_path = outdir / f"{video_id}.info.json"
+        if info_path.is_file():
+            try:
+                info = json.loads(info_path.read_text(encoding="utf-8"))
+            except ValueError:
+                info = {}
+    if not info:
+        status, message = _classify_stderr(proc.stderr)
+        return _fail(video_id, info, status, message)
+
+    comments = [_slim_comment(c) for c in info.get("comments") or []]
+    # When extraction is capped, yt-dlp reports the number it *extracted* as
+    # comment_count, not the video's total. The plain-fetch transcript record
+    # carries the real watch-page total — read it from the cache (free, local).
+    total = (_read_cache(video_id, None) or {}).get("comment_count")
+    if total is None:
+        total = info.get("comment_count")
+        if total is not None and total == len(comments) >= max_comments:
+            total = None  # capped: can't tell the real total apart from the cap
+    result = {
+        "status": "ok" if comments else "no_comments",
+        "video_id": video_id,
+        "url": f"https://youtu.be/{video_id}",
+        "title": info.get("title"),
+        "author": info.get("uploader"),
+        "comment_count": total,
+        "fetched_count": len(comments),
+        "sort": sort,
+        "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "comments": comments,
+    }
+    if not comments:
+        result["message"] = (
+            "Comments exist but none could be fetched."
+            if info.get("comment_count")
+            else "No comments returned — they may be disabled for this video."
+        )
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_file = CACHE_DIR / f"{video_id}.comments.json"
+        cache_file.write_text(json.dumps(result, ensure_ascii=False, indent=2))
+        result["cache_file"] = str(cache_file)
+    except OSError:
+        pass
+    return result
 
 
 # --- batch mode --------------------------------------------------------------
@@ -966,6 +1068,25 @@ def main(argv: list[str]) -> int:
     )
     _add_cookie_args(p_fetch)
 
+    p_comments = sub.add_parser(
+        "comments", help="fetch viewer comments (InnerTube, no API key) as JSON"
+    )
+    p_comments.add_argument("target", help="YouTube URL or 11-char video id")
+    p_comments.add_argument(
+        "--max",
+        type=int,
+        default=100,
+        dest="max_comments",
+        help="max comments to fetch, replies included (default: 100)",
+    )
+    p_comments.add_argument(
+        "--sort",
+        choices=("top", "new"),
+        default="top",
+        help="comment ordering (default: top)",
+    )
+    _add_cookie_args(p_comments)
+
     p_batch = sub.add_parser(
         "batch", help="fetch many transcripts into the cache + write a manifest (JSONL out)"
     )
@@ -1065,6 +1186,8 @@ def main(argv: list[str]) -> int:
 
     if args.cmd == "list":
         result = cmd_list(video_id)
+    elif args.cmd == "comments":
+        result = cmd_comments(video_id, args.max_comments, args.sort)
     else:
         result = cmd_fetch(video_id, args.lang)
 
