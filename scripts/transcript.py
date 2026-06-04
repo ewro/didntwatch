@@ -403,17 +403,42 @@ def _ytdlp_base() -> list[str]:
     return args
 
 
+# A fresh machine often has no cookie store for the configured browser at all.
+_COOKIE_DB_RE = re.compile(r"could not (?:find|copy|read).{0,60}cookies", re.IGNORECASE)
+
+
 def _run_ytdlp(extra: list[str], timeout: float = 120.0) -> subprocess.CompletedProcess:
-    """Run yt-dlp with the common args + `extra`. Never raises on non-zero."""
-    cmd = _ytdlp_base() + extra
-    return subprocess.run(
-        cmd,
-        env=_ytdlp_env(),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        stdin=subprocess.DEVNULL,
-    )
+    """Run yt-dlp with the common args + `extra`. Never raises on non-zero.
+
+    If the run dies because the configured browser has no cookie database
+    (fresh machine, no Firefox, …), retry once without cookies and stay
+    cookie-less for the rest of the process: cookies only *soften* the bot
+    wall — PO tokens alone fetch most public videos. When YouTube does demand
+    a login later, that surfaces as its own clear "sign in" classification.
+    """
+    global _COOKIE_ARGS
+
+    def run() -> subprocess.CompletedProcess:
+        return subprocess.run(
+            _ytdlp_base() + extra,
+            env=_ytdlp_env(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+        )
+
+    proc = run()
+    if proc.returncode != 0 and _COOKIE_ARGS and _COOKIE_DB_RE.search(proc.stderr or ""):
+        print(
+            "didntwatch: no browser cookies found — continuing without them "
+            "(most videos work; log into youtube.com in a browser if YouTube "
+            "starts demanding sign-in)",
+            file=sys.stderr,
+        )
+        _COOKIE_ARGS = []
+        proc = run()
+    return proc
 
 
 def _classify_stderr(stderr: str) -> tuple[str, str]:
@@ -422,7 +447,13 @@ def _classify_stderr(stderr: str) -> tuple[str, str]:
     if "http error 429" in s or "too many requests" in s:
         return ("blocked", "YouTube rate-limited the request (HTTP 429).")
     if "sign in to confirm" in s or "not a bot" in s:
-        return ("blocked", "YouTube demanded sign-in/bot confirmation (cookies/PO token issue).")
+        return (
+            "blocked",
+            "YouTube demands a signed-in browser session. Open "
+            "https://www.youtube.com in your browser, log in, then retry — "
+            "browser cookies are what get past this wall (Firefox by default; "
+            "set DIDNTWATCH_COOKIES_FROM_BROWSER for another browser).",
+        )
     if "po token" in s and "subtitle" in s:
         return ("blocked", "Subtitles require a PO token that could not be generated.")
     if "private video" in s or "members-only" in s or "join this channel" in s:

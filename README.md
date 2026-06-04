@@ -84,9 +84,11 @@ still drill into any single video by reading its cached transcript.
 - **Python 3.9+** (standard library only — no pip packages).
 - **`curl` and `tar`** for the first-run toolchain download.
 - Network access to YouTube (the script fetches subtitles directly).
-- A browser with a YouTube login — cookies are what get past the bot wall
-  (Firefox by default; override with `DIDNTWATCH_COOKIES_FROM_BROWSER` /
-  `DIDNTWATCH_COOKIES_FILE`).
+- *Recommended:* a browser with a YouTube login (Firefox by default; override
+  with `DIDNTWATCH_COOKIES_FROM_BROWSER` / `DIDNTWATCH_COOKIES_FILE`). Most
+  videos fetch fine without it — the script degrades gracefully when no
+  browser cookies exist — but when YouTube demands "sign in to confirm you're
+  not a bot", a logged-in browser is the only key.
 
 The fetching toolchain provisions itself into `.runtime/` on first run: the
 yt-dlp standalone build (~35 MB), the bgutil PO-token provider (built with
@@ -256,7 +258,10 @@ scripts/transcript.sh batch --input urls.txt --manifest manifest.json --lang ru
 
 ## Troubleshooting
 
-- **`blocked` / "request blocked":** YouTube rate-limits requests from shared or
+- **`blocked` with a "sign in" message:** YouTube wants a logged-in browser
+  session — open [youtube.com](https://www.youtube.com), log in, retry (set
+  `DIDNTWATCH_COOKIES_FROM_BROWSER` if your browser isn't Firefox).
+- **`blocked` otherwise:** YouTube rate-limits requests from shared or
   datacenter IPs. Retry later, or use the manual-paste fallback.
 - **`no_transcript` / `transcript_disabled`:** the video genuinely has no captions —
   the skill won't guess its content. Paste a transcript if you have one.

@@ -288,10 +288,30 @@ How to write it:
 | `ok`                  | Transcript fetched                       | Summarize in the chosen format; offer other formats/follow-ups. If `available_tracks` lists more languages, mention the user can switch. |
 | `no_transcript`       | No subtitle track (or empty)             | Say plainly the video has no subtitles. Do **not** invent content. Offer the manual-paste fallback. |
 | `transcript_disabled` | Captions disabled by the uploader        | Same as above — explain captions are turned off, offer manual paste. |
-| `blocked`             | YouTube blocked the request / rate limit | Explain access was blocked (often datacenter-IP/rate limiting), not the user's fault. Offer manual paste; optionally suggest retrying later. |
+| `blocked`             | YouTube blocked the request / rate limit | If the `message` mentions **sign-in**: YouTube wants a logged-in browser — see *No browser login* below. Otherwise explain access was blocked (often rate limiting), not the user's fault; offer manual paste or retrying later. |
 | `video_unavailable`   | Private/removed/age-restricted/unplayable| Explain the video can't be accessed. Offer manual paste if they have the text. |
 | `invalid_input`       | Couldn't parse a video id                | Ask for a valid YouTube link or 11-char id. |
 | `error`               | Anything else (see `message`)            | Relay the cause briefly; offer manual paste. |
+
+## No browser login (sign-in demanded)
+
+The script works without browser cookies for most videos (it silently degrades
+when the configured browser has no cookie store). But when YouTube answers
+"sign in to confirm you're not a bot", a logged-in browser session is the only
+key. In that case, in plain words:
+
+1. Tell the user YouTube wants to make sure they're human and asks for a
+   signed-in browser: *"Откройте https://www.youtube.com и войдите в аккаунт —
+   после этого я смогу прочитать видео."*
+2. **Offer to open the browser for them** — with permission, run
+   `xdg-open https://www.youtube.com` (Linux) or `open https://www.youtube.com`
+   (macOS), let them log in, then simply retry the same command.
+3. If their browser isn't Firefox, mention setting
+   `DIDNTWATCH_COOKIES_FROM_BROWSER=chrome` (etc.) once, matter-of-factly.
+4. Still walled? Fall back to manual paste as usual.
+
+There is no fully automatic login: YouTube killed OAuth device flows and
+password auth for third-party tools — a human in a browser is the floor.
 
 ## Manual-paste fallback
 
