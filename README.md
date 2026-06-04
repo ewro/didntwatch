@@ -34,18 +34,22 @@ single numbered markdown report with a short summary per video.
 
 ## How it compares
 
-Plenty of tools turn a YouTube link into a summary. The difference is everything
-that happens around that:
+Plenty of tools turn a YouTube link into a summary — from one-shot transcript
+skills to [fabric](https://github.com/danielmiessler/fabric)'s pattern pipelines.
+The difference is everything that happens around that:
 
-| | Typical transcript skill / summarizer | **tldw** |
-|---|---|---|
-| **Transcript fetching** | `youtube-transcript-api` (breaks against YouTube's PO-token wall and datacenter-IP blocks) or a paid transcript API | ✅ `yt-dlp` + `bgutil` PO-token provider + browser cookies + TLS impersonation — free, and survives YouTube's 2025–26 hardening |
-| **The summarizer** | a fixed prompt over a cheap API model, one shot | ✅ the agent itself — the summary is just the *first* turn; the transcript stays in context for follow-up Q&A, quotes, deep links |
-| **Failure handling** | "couldn't fetch" | ✅ an eight-status taxonomy (`ok`, `no_transcript`, `blocked`, `video_unavailable`, …), each mapped to a distinct behavior, plus a manual-paste fallback |
-| **Memory** | none — every question re-fetches | ✅ offline cache + lookup index: `find` recalls any seen video by title *or topic words inside the transcript*, months later, with zero network |
-| **Batch / scale** | none, or a naive per-video loop | ✅ built around the agent's context window: one throttled resumable fetch pass → slim manifest → map-reduce across sub-agents → a single numbered report |
-| **Languages** | whatever YouTube hands back, machine translations included | ✅ real tracks only (author-uploaded > original auto captions); the machine-translation endpoints are unreachable *by design* — the model translates while summarizing |
-| **Epistemics** | summary and opinion blended | ✅ a strict contract: the summary is transcript-only; commentary ("Claude's take") is opt-in, clearly labeled, and grounded with web checks |
+| | Typical transcript skill | fabric (`-y` + pattern) | **tldw** |
+|---|---|---|---|
+| **Transcript fetching** | `youtube-transcript-api` — breaks against YouTube's PO-token wall — or a paid transcript API | system `yt-dlp` you install yourself; no PO-token provider, VTT only | ✅ self-provisioned `yt-dlp` + `bgutil` PO-token provider + browser cookies + TLS impersonation — survives YouTube's 2025–26 hardening |
+| **The summarizer** | a fixed prompt over a cheap API model, one shot | any provider incl. local models, pattern library + reasoning strategies — still a one-shot text→text pass | ✅ the agent itself — the summary is just the *first* turn of a conversation |
+| **After the summary** | done | stateless: re-run the pipeline for every question | ✅ the transcript stays in context: follow-up Q&A, quotes, timestamps, drill-down — no re-fetch |
+| **Failure handling** | "couldn't fetch" | error strings | ✅ an eight-status taxonomy (`ok`, `no_transcript`, `blocked`, …), each mapped to a distinct behavior, plus a manual-paste fallback |
+| **Memory** | none | none | ✅ offline cache + index: `find` recalls any seen video by title *or topic words inside the transcript*, months later, zero network |
+| **Batch / scale** | none | a shell loop you write yourself | ✅ throttled resumable fetch pass → slim manifest → map-reduce across sub-agents → one numbered report, built around the context window |
+| **Languages** | whatever YouTube hands back, machine translations included | language fallback can silently pull a machine translation | ✅ real tracks only (author-uploaded > original auto captions); the model translates while summarizing |
+| **Beyond the transcript** | — | ✅ comments & metadata (YouTube API key), frame extraction via OCR/FFmpeg | transcript only, by design |
+| **Epistemics** | summary and opinion blended | depends on the pattern | ✅ a strict contract: the summary is transcript-only; commentary is opt-in, clearly labeled, grounded with web checks |
+| **Environment & cost** | a browser extension or SaaS subscription | any shell on any OS; $0 with local models | any agentic LLM harness (the engine is a standalone CLI; the skill manifest is a thin adapter) — first-class in **Claude Code**, best with a frontier model; Linux/macOS today |
 
 ## How it works
 
@@ -127,7 +131,7 @@ report — the skill switches to batch mode automatically:
 
 ```
 Here's my bookmarks file — pull every YouTube link from the "Watch later" folder
-and give a short summary of each, save to ./yt/2026-spring.md with numbering.
+and give a short summary of each, save to yt_bookmarks_summary.md with numbering.
 ```
 
 ### Output formats (you pick; default = **key theses**)
