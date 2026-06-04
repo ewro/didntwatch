@@ -15,6 +15,59 @@ single numbered markdown report with a short summary per video.
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)
 
+## Usage
+
+In any Claude Code session ([installation](#installation) is one `git clone`),
+just share a video and ask for a summary — the skill activates automatically
+(in any language you write), or invoke it explicitly with `/didntwatch`.
+
+The summary is only the opening move — the video stays in the conversation,
+so a full session reads like this:
+
+```text
+You:  Summarize this video: https://youtu.be/zjkBMFhNj_g
+      → key theses of the hour-long talk, in your language
+
+You:  What does he say about jailbreaks and prompt injection?
+      → answers with quotes — no re-fetching
+
+You:  Recap the whole talk by sections, with timestamps
+      → topical sections, each with a deep link like youtu.be/…?t=1234
+
+You:  Now your take — how well has this aged?
+      → "Claude's take": claim-by-claim verdicts, checked against the web,
+        clearly separated from what the video itself says
+
+You:  And what do the viewers think? Anyone pushing back?
+      → comment analysis: corrections and disputes first, then what the
+        author replied to and hearted, dominant themes — honestly framed
+        as "top N of the video's M comments"
+```
+
+For a **list of videos**, give several links (or a bookmarks file) and ask for a
+report — the skill switches to batch mode automatically:
+
+```
+Here's my bookmarks file — pull every YouTube link from the "Watch later" folder
+and give a short summary of each, save to yt_bookmarks_summary.md with numbering.
+```
+
+### Output formats (you pick; default = **key theses**)
+
+- **Short summary** — a few sentences capturing the gist.
+- **Key theses** — a bulleted list of the main points *(default)*.
+- **Sectioned recap with timecodes** — topical sections, each with an `mm:ss` and a
+  deep link like `https://youtu.be/<id>?t=<seconds>`.
+
+You can also set the summary **language** (defaults to the language you wrote in,
+else the transcript language) and **length** (default: medium).
+
+### Manual-paste fallback
+
+If a transcript can't be fetched (no captions, access blocked, etc.), paste the
+transcript text yourself and ask for a summary — Claude summarizes the pasted text
+directly, with the same no-fabrication rule.
+
 ## What it does
 
 - Accepts every common YouTube link form (`watch?v=`, `youtu.be/`, `/shorts/`,
@@ -116,59 +169,6 @@ git clone https://github.com/ewro/didntwatch.git ~/.claude/skills/didntwatch
 That's it. The fetching toolchain bootstraps itself the first time the skill runs
 (expect a one-time download on the first call). Restart Claude Code (or start a
 new session) so it picks up the new skill.
-
-## Usage
-
-In any Claude Code session, just share a video and ask for a summary — the skill
-activates automatically (in any language you write), or invoke it
-explicitly with `/didntwatch`.
-
-The summary is only the opening move — the video stays in the conversation,
-so a full session reads like this:
-
-```text
-You:  Summarize this video: https://youtu.be/zjkBMFhNj_g
-      → key theses of the hour-long talk, in your language
-
-You:  What does he say about jailbreaks and prompt injection?
-      → answers with quotes — no re-fetching
-
-You:  Recap the whole talk by sections, with timestamps
-      → topical sections, each with a deep link like youtu.be/…?t=1234
-
-You:  Now your take — how well has this aged?
-      → "Claude's take": claim-by-claim verdicts, checked against the web,
-        clearly separated from what the video itself says
-
-You:  And what do the viewers think? Anyone pushing back?
-      → comment analysis: corrections and disputes first, then what the
-        author replied to and hearted, dominant themes — honestly framed
-        as "top N of the video's M comments"
-```
-
-For a **list of videos**, give several links (or a bookmarks file) and ask for a
-report — the skill switches to batch mode automatically:
-
-```
-Here's my bookmarks file — pull every YouTube link from the "Watch later" folder
-and give a short summary of each, save to yt_bookmarks_summary.md with numbering.
-```
-
-### Output formats (you pick; default = **key theses**)
-
-- **Short summary** — a few sentences capturing the gist.
-- **Key theses** — a bulleted list of the main points *(default)*.
-- **Sectioned recap with timecodes** — topical sections, each with an `mm:ss` and a
-  deep link like `https://youtu.be/<id>?t=<seconds>`.
-
-You can also set the summary **language** (defaults to the language you wrote in,
-else the transcript language) and **length** (default: medium).
-
-### Manual-paste fallback
-
-If a transcript can't be fetched (no captions, access blocked, etc.), paste the
-transcript text yourself and ask for a summary — Claude summarizes the pasted text
-directly, with the same no-fabrication rule.
 
 ## The transcript CLI (optional, standalone)
 
