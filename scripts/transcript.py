@@ -38,7 +38,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -57,7 +56,6 @@ BGUTIL_SCRIPT = RUNTIME_DIR / "bgutil" / "server" / "build" / "generate_once.js"
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 # Same, but anywhere we can pull it out of a URL path/query.
 _ID_IN_TEXT_RE = re.compile(r"([A-Za-z0-9_-]{11})")
-_CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
 
 
 def extract_video_id(raw: str) -> str | None:
@@ -432,21 +430,6 @@ def _classify_stderr(stderr: str) -> tuple[str, str]:
     return ("error", (stderr or "").strip().splitlines()[-1] if stderr.strip() else "yt-dlp failed.")
 
 
-def fetch_oembed_title(video_id: str) -> dict:
-    """Best-effort title/author via the keyless oembed endpoint. Never raises."""
-    url = (
-        "https://www.youtube.com/oembed?url="
-        f"https://www.youtube.com/watch?v={video_id}&format=json"
-    )
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "tldw/2.0"})
-        with urllib.request.urlopen(req, timeout=8) as resp:
-            data = json.load(resp)
-        return {"title": data.get("title"), "author": data.get("author_name")}
-    except Exception:
-        return {"title": None, "author": None}
-
-
 # --- subtitle parsing --------------------------------------------------------
 
 
@@ -545,39 +528,39 @@ def _parse_sub_file(path: Path) -> list[dict]:
 # --- core fetch --------------------------------------------------------------
 
 
-def _lang_order(requested: str | None, title: str | None) -> list[str]:
-    """Languages to try, in order. Requested wins; else guess native by script.
-
-    We don't know a video's native language up front, and only the *first*
-    requested subtitle download reliably succeeds (the rest tend to 429), so we
-    request one language at a time. A Cyrillic title => Russian first, else
-    English first, with the other as fallback.
-    """
-    if requested:
-        return [requested]
-    default = os.environ.get("TLDW_DEFAULT_LANGS", "")
-    if default:
-        return [x.strip() for x in default.split(",") if x.strip()]
-    if title and _CYRILLIC_RE.search(title):
-        return ["ru", "en"]
-    return ["en", "ru"]
+# The single original auto-caption track always carries a "-orig" suffix; the
+# ~150 machine-translation targets never do, so this selector cannot touch
+# YouTube's per-language translation endpoints (which aggressively 429).
+_ORIG_SELECTOR = ".*-orig"
 
 
-def _download_sub(video_id: str, lang: str, outdir: Path) -> tuple[list[dict] | None, dict, str]:
-    """Try to download one subtitle language. Returns (segments|None, info, stderr).
+def _base_lang(code: str | None) -> str | None:
+    """'en-orig' / 'pt-BR' -> 'en' / 'pt' for loose language comparison."""
+    if not code:
+        return None
+    return code.removesuffix("-orig").split("-")[0].lower()
 
-    Writes the chosen sub + the info.json into `outdir`. `info` is the parsed
-    info.json (title/uploader/available tracks) or {} on failure.
+
+def _download_sub(
+    video_id: str, selector: str, outdir: Path, *, manual_only: bool = False
+) -> tuple[list[dict] | None, dict, str]:
+    """Download the subtitle track matching `selector` into `outdir`.
+
+    `selector` is a yt-dlp --sub-langs pattern: an exact code ("ru") or a
+    regex (".*-orig"). With `manual_only`, only author-uploaded subtitles are
+    requested — they live in a separate namespace from auto captions, so a
+    plain code can never resolve to a machine translation.
+    Returns (segments|None, info, stderr). `info` is the parsed info.json
+    (title/uploader/available tracks) or {} on failure.
     """
     extra = [
         "--skip-download",
         "--ignore-no-formats-error",
         "--no-warnings",
         "--write-subs",
-        "--write-auto-subs",
         "--write-info-json",
         "--sub-langs",
-        lang,
+        selector,
         "--sub-format",
         "json3/vtt/best",
         "--retries",
@@ -588,6 +571,8 @@ def _download_sub(video_id: str, lang: str, outdir: Path) -> tuple[list[dict] | 
         str(outdir / "%(id)s.%(ext)s"),
         f"https://youtu.be/{video_id}",
     ]
+    if not manual_only:
+        extra.insert(4, "--write-auto-subs")
     proc = _run_ytdlp(extra)
     info: dict = {}
     info_path = outdir / f"{video_id}.info.json"
@@ -638,40 +623,80 @@ def _available_tracks(info: dict) -> list[dict]:
 
 
 def _fetch_one(video_id: str, lang: str | None) -> dict:
-    """Fetch one transcript and persist it. Returns a full record.
+    """Fetch the best genuine subtitle track and persist it. Returns a full record.
 
-    Shared core behind both `fetch` and `batch`. On success it includes the
-    heavy `text`/`segments` and writes the cache file; on failure it returns a
-    `{status, video_id, message, ...}` record.
+    Shared core behind both `fetch` and `batch`. Two-step strategy that never
+    requests YouTube's machine translations:
+      1. An optimistic call grabs the original auto-caption track (".*-orig")
+         plus info.json — for most videos that is the whole job.
+      2. If info.json shows author-uploaded subtitles (cleaner than ASR), or
+         `lang` names one, a second exact call fetches that manual track.
+    `lang` only chooses among the video's real tracks; when it matches none,
+    the best real track is returned with `requested_lang`/`lang_fallback` set —
+    summary-language translation is the caller's job, not YouTube's.
     """
-    meta = fetch_oembed_title(video_id)
-    order = _lang_order(lang, meta.get("title"))
-
-    last_stderr = ""
-    info: dict = {}
     with tempfile.TemporaryDirectory(prefix="tldw-") as tmp:
-        tmpdir = Path(tmp)
-        for code in order:
-            segments, info, stderr = _download_sub(video_id, code, tmpdir)
-            last_stderr = stderr or last_stderr
-            if segments:
-                actual_lang = _detect_lang_from_files(tmpdir, video_id) or code
-                return _build_ok(video_id, meta, info, actual_lang, segments)
+        orig_dir = Path(tmp) / "orig"
+        orig_dir.mkdir()
+        orig_segs, info, last_stderr = _download_sub(video_id, _ORIG_SELECTOR, orig_dir)
+        tracks = _available_tracks(info)
+        manual_tracks = [t for t in tracks if not t["is_generated"]]
+        orig_code = _detect_lang_from_files(orig_dir, video_id)
 
-    # Nothing downloaded. Distinguish "blocked/unavailable" from "no captions".
-    if last_stderr.strip():
+        # Pick the manual track worth a second call, if any.
+        target: dict | None = None
+        fallback = False
+        if lang:
+            target = next(
+                (t for t in manual_tracks if _base_lang(t["language_code"]) == _base_lang(lang)),
+                None,
+            )
+            if target is None and not (orig_segs and _base_lang(orig_code) == _base_lang(lang)):
+                fallback = True  # no real track in the requested language
+        if target is None and (not lang or fallback) and manual_tracks:
+            # Prefer the manual track in the video's own language. info.json's
+            # `language` is often absent (tv client), so the original
+            # auto-caption track — the spoken language — is the fallback proxy;
+            # last resorts: English, then whatever comes first.
+            video_lang = _base_lang(info.get("language")) or _base_lang(
+                orig_code
+                or next((t["language_code"] for t in tracks if t["is_generated"]), None)
+            )
+            target = next(
+                (t for t in manual_tracks if _base_lang(t["language_code"]) == video_lang),
+                next(
+                    (t for t in manual_tracks if _base_lang(t["language_code"]) == "en"),
+                    manual_tracks[0],
+                ),
+            )
+
+        if target is not None:
+            man_dir = Path(tmp) / "manual"
+            man_dir.mkdir()
+            man_segs, man_info, man_stderr = _download_sub(
+                video_id, target["language_code"], man_dir, manual_only=True
+            )
+            last_stderr = man_stderr or last_stderr
+            if man_segs:
+                code = _detect_lang_from_files(man_dir, video_id) or target["language_code"]
+                return _build_ok(
+                    video_id, info or man_info, code, man_segs,
+                    is_generated=False, requested=lang, fallback=fallback,
+                )
+            # Manual fetch failed — the original track is still a good answer.
+
+        if orig_segs:
+            return _build_ok(
+                video_id, info, orig_code or "und", orig_segs,
+                is_generated=True, requested=lang, fallback=fallback,
+            )
+
+        # Nothing downloaded. info.json knowing no real tracks beats stderr
+        # noise: a failed probe often *also* leaves an unrelated error line.
+        if info and not tracks:
+            return _fail(video_id, info, "no_transcript", "No subtitle tracks found for this video.")
         status, message = _classify_stderr(last_stderr)
-        if status != "error":
-            return _fail(video_id, meta, status, message)
-    # info.json fetched but no track in the requested language(s):
-    if info and not _available_tracks(info):
-        return _fail(video_id, meta, "no_transcript", "No subtitle tracks found for this video.")
-    return _fail(
-        video_id,
-        meta,
-        "no_transcript",
-        "No subtitle track available in the requested/guessed language.",
-    )
+        return _fail(video_id, info, status, message)
 
 
 def _detect_lang_from_files(tmpdir: Path, video_id: str) -> str | None:
@@ -684,30 +709,40 @@ def _detect_lang_from_files(tmpdir: Path, video_id: str) -> str | None:
     return None
 
 
-def _build_ok(video_id: str, meta: dict, info: dict, lang_code: str, segments: list[dict]) -> dict:
+def _build_ok(
+    video_id: str,
+    info: dict,
+    track_code: str,
+    segments: list[dict],
+    *,
+    is_generated: bool,
+    requested: str | None = None,
+    fallback: bool = False,
+) -> dict:
     full_text = "\n".join(s["text"] for s in segments).strip()
     if not full_text:
-        return _fail(video_id, meta, "no_transcript", "Transcript track was empty.")
-    auto = info.get("automatic_captions") or {}
-    manual = info.get("subtitles") or {}
-    is_generated = lang_code in auto and lang_code not in manual
+        return _fail(video_id, info, "no_transcript", "Transcript track was empty.")
+    # Cache/index under the plain language code ("en-orig" -> "en").
     result = {
         "status": "ok",
         "video_id": video_id,
         "url": f"https://youtu.be/{video_id}",
-        "title": meta.get("title") or info.get("title"),
-        "author": meta.get("author") or info.get("uploader"),
-        "language_code": lang_code,
+        "title": info.get("title"),
+        "author": info.get("uploader"),
+        "language_code": track_code.removesuffix("-orig"),
         "is_generated": is_generated,
         "available_tracks": _available_tracks(info),
         "segment_count": len(segments),
         "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "text": full_text,
-        "segments": segments,
     }
+    if requested and fallback:
+        result["requested_lang"] = requested
+        result["lang_fallback"] = True
+    result["text"] = full_text
+    result["segments"] = segments
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache_file = CACHE_DIR / f"{video_id}.{lang_code}.json"
+        cache_file = CACHE_DIR / f"{video_id}.{result['language_code']}.json"
         cache_file.write_text(json.dumps(result, ensure_ascii=False, indent=2))
         result["cache_file"] = str(cache_file)
     except OSError:
@@ -717,13 +752,13 @@ def _build_ok(video_id: str, meta: dict, info: dict, lang_code: str, segments: l
     return result
 
 
-def _fail(video_id: str, meta: dict, status: str, message: str) -> dict:
+def _fail(video_id: str, info: dict, status: str, message: str) -> dict:
     return {
         "status": status,
         "video_id": video_id,
         "url": f"https://youtu.be/{video_id}",
-        "title": meta.get("title"),
-        "author": meta.get("author"),
+        "title": info.get("title"),
+        "author": info.get("uploader"),
         "message": message,
     }
 
@@ -923,7 +958,12 @@ def main(argv: list[str]) -> int:
 
     p_fetch = sub.add_parser("fetch", help="fetch one transcript as JSON")
     p_fetch.add_argument("target", help="YouTube URL or 11-char video id")
-    p_fetch.add_argument("--lang", default=None, help="preferred language code (e.g. en, ru)")
+    p_fetch.add_argument(
+        "--lang",
+        default=None,
+        help="prefer this language among the video's REAL subtitle tracks "
+        "(never machine translations); falls back to the best real track",
+    )
     _add_cookie_args(p_fetch)
 
     p_batch = sub.add_parser(
@@ -931,7 +971,12 @@ def main(argv: list[str]) -> int:
     )
     p_batch.add_argument("targets", nargs="*", help="YouTube URLs or 11-char ids (with --input)")
     p_batch.add_argument("--input", default=None, help="file with one URL/id per line (# comments ok)")
-    p_batch.add_argument("--lang", default=None, help="preferred language code for every video")
+    p_batch.add_argument(
+        "--lang",
+        default=None,
+        help="preferred language among each video's real subtitle tracks "
+        "(never machine translations)",
+    )
     p_batch.add_argument("--manifest", default=None, help="write a JSON-array index of all records here")
     p_batch.add_argument("--concurrency", type=int, default=2, help="parallel requests (default: 2)")
     p_batch.add_argument("--delay", type=float, default=1.0, help="seconds between requests (default: 1.0)")

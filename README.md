@@ -133,10 +133,11 @@ You can run the fetcher directly; it prints JSON and never summarizes.
 # list available subtitle tracks
 scripts/transcript.sh list "https://youtu.be/8jPQjjsBbIc"
 
-# fetch the default track
+# fetch the best real track (author-uploaded subtitles if any, else original auto captions)
 scripts/transcript.sh fetch "https://youtu.be/8jPQjjsBbIc"
 
-# fetch a specific language (translates if the track is translatable)
+# prefer a specific language among the video's REAL tracks (never machine translations;
+# falls back to the best real track with `lang_fallback: true`)
 scripts/transcript.sh fetch "8jPQjjsBbIc" --lang ru
 
 # batch: many videos into the cache + a manifest (slim JSONL on stdout)
@@ -190,7 +191,7 @@ scripts/transcript.sh batch --input urls.txt --manifest manifest.json --lang ru
 |------|---------|--------------|
 | `--input <file>` | — | One URL/id per line; blank lines and `#` comments ignored. |
 | *(positional)* | — | URLs/ids as arguments, combined with `--input`. Duplicate ids are de-duplicated. |
-| `--lang <code>` | — | Preferred language for every video (translates when possible). |
+| `--lang <code>` | — | Preferred language among each video's real subtitle tracks (never machine translations). |
 | `--manifest <path>` | — | Write a JSON array of all records (the report index). |
 | `--concurrency <n>` | `2` | Parallel requests. |
 | `--delay <sec>` | `1.0` | Pause between requests. |

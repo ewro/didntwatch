@@ -111,9 +111,9 @@ The helper script self-installs its dependency into a local venv on first run
 
 ```bash
 # from the skill folder
-scripts/transcript.sh list  "<youtube-url-or-id>"          # what languages exist
-scripts/transcript.sh fetch "<youtube-url-or-id>"          # default language
-scripts/transcript.sh fetch "<youtube-url-or-id>" --lang ru # specific/translated
+scripts/transcript.sh list  "<youtube-url-or-id>"          # what tracks exist
+scripts/transcript.sh fetch "<youtube-url-or-id>"          # best real track (manual > original auto)
+scripts/transcript.sh fetch "<youtube-url-or-id>" --lang ru # prefer a specific REAL track (rare)
 
 # batch mode (many videos -> cache + manifest, slim JSONL on stdout):
 scripts/transcript.sh batch --input urls.txt --manifest manifest.json [--lang ru]
@@ -130,19 +130,30 @@ Accepts every common link form (`watch?v=`, `youtu.be/`, `/shorts/`, `/embed/`,
 
 ## Workflow
 
-1. **Get the transcript.** Run `scripts/transcript.sh fetch "<input>"`. To honor
-   a requested summary language, pass `--lang <code>` (it translates when the
-   track is translatable). The script prints JSON and caches it to
-   `.cache/<id>.<lang>.json`.
+1. **Get the transcript.** Run `scripts/transcript.sh fetch "<input>"` — no
+   `--lang`. It returns the video's best real track (author-uploaded subtitles
+   if any, else the original auto captions), prints JSON and caches it to
+   `.cache/<id>.<lang>.json`. The **summary language is your job**, not the
+   transcript's: you summarize an English transcript in Russian (or any
+   requested language) directly — never ask YouTube for a translated track.
+   `--lang <code>` exists only to pick among several real tracks (e.g. a video
+   whose author uploaded subtitles in multiple languages); when no such track
+   exists the result carries `requested_lang`/`lang_fallback: true` — just
+   proceed with what came back.
 2. **Branch on `status`** (see table below).
 3. **On `ok`, summarize** in the chosen format/length/language using only
    `text` / `segments`. Then stay available: the transcript is in context (and
    on disk) — answer follow-up questions, pull quotes, drill into sections, or
    switch format without re-fetching.
+4. **Offer commentary (single mode only).** If the video has anything worth
+   appraising (claims, an argument, advice — not pure entertainment), close with
+   **one** line offering your own take, e.g. *"Хочешь, добавлю свой комментарий —
+   насколько обоснованна и сбалансированна позиция автора?"* Do **not** write the
+   commentary unless asked. See **Commentary** below.
 
-If the user clearly named a language up front (e.g. "summarize in Russian"), go
-straight to `fetch --lang`. Use `list` when you need to show or choose among
-available languages.
+A requested summary language ("summarize in Russian") does **not** change the
+fetch — plain `fetch`, then write the summary in that language yourself. Use
+`list` when you need to show or choose among available tracks.
 
 ## Recall — drilling into an already-seen video
 
@@ -188,6 +199,50 @@ maintained on every successful fetch, so `find` stays cheap and offline.
 The user may also set the summary **language** (default: the language they wrote
 in, else the transcript language) and **length** (default: medium). Honor both.
 
+## Commentary — Claude's own take (on request only)
+
+The summary answers *what the video says*. Commentary answers *what you think of
+it*: is the argument sound, balanced, current, does it hold up against outside
+knowledge. This is the **opposite contract** to the summary — here you may and
+should use knowledge beyond the transcript. Keep the two layers strictly
+separate: the summary stays transcript-only; commentary is clearly your own.
+
+**Never auto-generate it. It runs in exactly two cases:**
+
+- The user explicitly asks — "разбери критически", "насколько это обоснованно",
+  "сравни с консенсусом", "что думаешь", "is this legit", etc.
+- Otherwise, **after a standard single-video summary, you offer it once** (see
+  Workflow step 4) and write it only if the user says yes.
+
+**Single mode / recall only — never in batch** (a web lookup per video × N is too
+costly and slow).
+
+How to write it:
+
+- **Label it, once.** Open the block with a header **"Комментарий от Claude"** (in
+  the user's language — e.g. "Claude's take"). That label *is* the signal that
+  this is judgment, not gospel — so do **not** keep sprinkling "это лишь моё
+  мнение / just my opinion" disclaimers. Say it once via the header, then give the
+  substance straight.
+- **Separate claim from verdict.** State what the author argues, then whether it
+  holds. Point-by-point verdict markers ✅ / ⚠️ / ❌ work well.
+- **Ground it.** For checkable factual claims, compare against established
+  consensus and cite sources; use web search when stakes or recency warrant
+  (fast-moving science, news, prices). Distinguish "the author's framing" from
+  "where the evidence actually is". Decide this **per load-bearing claim, not per
+  video** — verify only the claims the verdict rests on, and back each one you
+  verify with a source.
+- **Calibrate, and show direction of update.** State confidence plainly; if you
+  re-check against fresh evidence, say which way your view moved and by how much.
+  Don't hedge into mush.
+- **Domain-risk caveats are the exception — spell those out explicitly.** For
+  medicine, law, finance, safety and similar high-stakes domains, add a distinct,
+  visible note that this is not authoritative and point to primary or professional
+  sources. This is the *one* place to add an explicit caveat; everywhere else the
+  label already does the job.
+- **Skip when there's nothing to appraise** — pure entertainment, vlogs, music.
+  Don't offer or write commentary on content with no checkable claims or argument.
+
 ## `status` → what to do
 
 | `status`              | Meaning                                  | Your response |
@@ -214,8 +269,8 @@ no-fabrication rule applies.
 - *"tldw https://youtu.be/dQw4w9WgXcQ"* → `fetch`, then key theses (default).
 - *"Перескажи это видео по разделам с тайм-кодами: <ссылка>"* → `fetch`, then
   sectioned recap with `?t=` deep links, in Russian.
-- *"Summarize in English, short: <shorts-url>"* → `fetch --lang en`, 2–3
-  sentences.
+- *"Summarize in English, short: <shorts-url>"* → `fetch` (no `--lang`), then
+  2–3 sentences in English.
 - *"No captions? Here's the transcript: <pasted text>"* → summarize the pasted
   text, no fetch.
 - After a summary: *"What did they say about pricing?"* → answer from the cached
