@@ -1,6 +1,6 @@
-# didntwatch — your agent did
+# didntwatch
 
-*Too long; didn't watch.*
+*Too long; didn't watch — your agent did.*
 
 A [Claude Code](https://claude.com/claude-code) **Agent Skill** that summarizes a
 YouTube video from its transcript (subtitles). Give Claude a YouTube link and get
