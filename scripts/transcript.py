@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""tldw transcript fetcher (yt-dlp + bgutil PO-token backend).
+"""didntwatch transcript fetcher (yt-dlp + bgutil PO-token backend).
 
 A deliberately small, single-purpose tool: it turns a YouTube URL (or bare
 video ID) into a clean transcript and prints structured JSON. It does NOT
@@ -25,7 +25,7 @@ subtitle downloads. We get past it with a self-contained toolchain under
 (bundles curl_cffi for browser TLS impersonation), a local Node runtime, and
 the bgutil PO-token provider in script mode. Browser cookies (your YouTube
 login) are the final key — pass them with --cookies-from-browser / --cookies
-or the TLDW_COOKIES_FROM_BROWSER / TLDW_COOKIES_FILE env vars.
+or the DIDNTWATCH_COOKIES_FROM_BROWSER / DIDNTWATCH_COOKIES_FILE env vars.
 """
 
 from __future__ import annotations
@@ -355,7 +355,7 @@ def _read_cache(video_id: str, lang: str | None) -> dict | None:
 
 # Process-wide cookie/impersonate config, set once from CLI args + env in main().
 _COOKIE_ARGS: list[str] = []
-_IMPERSONATE = os.environ.get("TLDW_IMPERSONATE", "chrome")
+_IMPERSONATE = os.environ.get("DIDNTWATCH_IMPERSONATE", "chrome")
 
 
 def _resolve_cookie_args(cookies_from_browser: str | None, cookies_file: str | None) -> list[str]:
@@ -364,16 +364,16 @@ def _resolve_cookie_args(cookies_from_browser: str | None, cookies_file: str | N
     Precedence: explicit --cookies file > --cookies-from-browser > env file >
     env browser > default browser (firefox). Cookies are what get past the
     PO-token wall, so we always pass *something* unless explicitly disabled
-    with TLDW_COOKIES_FROM_BROWSER=none.
+    with DIDNTWATCH_COOKIES_FROM_BROWSER=none.
     """
     if cookies_file:
         return ["--cookies", cookies_file]
     if cookies_from_browser:
         return ["--cookies-from-browser", cookies_from_browser]
-    env_file = os.environ.get("TLDW_COOKIES_FILE")
+    env_file = os.environ.get("DIDNTWATCH_COOKIES_FILE")
     if env_file:
         return ["--cookies", env_file]
-    env_browser = os.environ.get("TLDW_COOKIES_FROM_BROWSER", "firefox")
+    env_browser = os.environ.get("DIDNTWATCH_COOKIES_FROM_BROWSER", "firefox")
     if env_browser and env_browser.lower() != "none":
         return ["--cookies-from-browser", env_browser]
     return []
@@ -641,7 +641,7 @@ def _fetch_one(video_id: str, lang: str | None) -> dict:
     the best real track is returned with `requested_lang`/`lang_fallback` set —
     summary-language translation is the caller's job, not YouTube's.
     """
-    with tempfile.TemporaryDirectory(prefix="tldw-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="didntwatch-") as tmp:
         orig_dir = Path(tmp) / "orig"
         orig_dir.mkdir()
         orig_segs, info, last_stderr = _download_sub(video_id, _ORIG_SELECTOR, orig_dir)
@@ -778,7 +778,7 @@ def cmd_fetch(video_id: str, lang: str | None) -> dict:
 
 def cmd_list(video_id: str) -> dict:
     """List available subtitle tracks via a metadata-only yt-dlp probe."""
-    with tempfile.TemporaryDirectory(prefix="tldw-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="didntwatch-") as tmp:
         out = Path(tmp) / "%(id)s.%(ext)s"
         proc = _run_ytdlp(
             [
@@ -836,7 +836,7 @@ def cmd_comments(video_id: str, max_comments: int, sort: str) -> dict:
     thread structure) and caches it to `.cache/<id>.comments.json`. The video's
     total `comment_count` comes from the same info.json — no extra request.
     """
-    with tempfile.TemporaryDirectory(prefix="tldw-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="didntwatch-") as tmp:
         outdir = Path(tmp)
         extra = [
             "--skip-download",
@@ -972,7 +972,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
         print(json.dumps(record, ensure_ascii=False), flush=True)
         state["done"] += 1
         status = record.get("status")
-        print(f"tldw: {state['done']}/{total} {vid} {status}", file=sys.stderr)
+        print(f"didntwatch: {state['done']}/{total} {vid} {status}", file=sys.stderr)
         if status == "blocked":
             state["blocked_streak"] += 1
         elif status == "ok":
@@ -980,7 +980,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
         if state["blocked_streak"] >= _BLOCKED_STREAK_LIMIT and not state["stopped"]:
             state["stopped"] = True
             print(
-                f"tldw: stopping early after {state['blocked_streak']} consecutive "
+                f"didntwatch: stopping early after {state['blocked_streak']} consecutive "
                 "'blocked' results — YouTube is rate-limiting us (or cookies/PO token "
                 "are not working). Re-run the same command later to resume.",
                 file=sys.stderr,
@@ -1043,7 +1043,7 @@ def _add_cookie_args(p: argparse.ArgumentParser) -> None:
         "--cookies-from-browser",
         default=None,
         help="browser to read YouTube cookies from (firefox, chrome, ...); "
-        "defaults to $TLDW_COOKIES_FROM_BROWSER or 'firefox'",
+        "defaults to $DIDNTWATCH_COOKIES_FROM_BROWSER or 'firefox'",
     )
     p.add_argument(
         "--cookies", default=None, help="path to a cookies.txt file (overrides --cookies-from-browser)"
@@ -1156,7 +1156,7 @@ def main(argv: list[str]) -> int:
                 {
                     "status": "error",
                     "message": (
-                        "tldw runtime not provisioned: missing .runtime/bin/yt-dlp. "
+                        "didntwatch runtime not provisioned: missing .runtime/bin/yt-dlp. "
                         "Run scripts/transcript.sh once to bootstrap it."
                     ),
                 }

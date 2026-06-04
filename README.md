@@ -1,4 +1,6 @@
-# tldw — too long; didn't watch
+# didntwatch — your agent did
+
+*Too long; didn't watch.*
 
 A [Claude Code](https://claude.com/claude-code) **Agent Skill** that summarizes a
 YouTube video from its transcript (subtitles). Give Claude a YouTube link — in any
@@ -41,7 +43,7 @@ Plenty of tools turn a YouTube link into a summary — from one-shot transcript
 skills to [fabric](https://github.com/danielmiessler/fabric)'s pattern pipelines.
 The difference is everything that happens around that:
 
-| | Typical transcript skill | fabric (`-y` + pattern) | **tldw** |
+| | Typical transcript skill | fabric (`-y` + pattern) | **didntwatch** |
 |---|---|---|---|
 | **Transcript fetching** | `youtube-transcript-api` — breaks against YouTube's PO-token wall — or a paid transcript API | system `yt-dlp` you install yourself; no PO-token provider, VTT only | ✅ self-provisioned `yt-dlp` + `bgutil` PO-token provider + browser cookies + TLS impersonation — survives YouTube's 2025–26 hardening |
 | **The summarizer** | a fixed prompt over a cheap API model, one shot | any provider incl. local models, pattern library + reasoning strategies — still a one-shot text→text pass | ✅ the agent itself — the summary is just the *first* turn of a conversation |
@@ -83,8 +85,8 @@ still drill into any single video by reading its cached transcript.
 - **`curl` and `tar`** for the first-run toolchain download.
 - Network access to YouTube (the script fetches subtitles directly).
 - A browser with a YouTube login — cookies are what get past the bot wall
-  (Firefox by default; override with `TLDW_COOKIES_FROM_BROWSER` /
-  `TLDW_COOKIES_FILE`).
+  (Firefox by default; override with `DIDNTWATCH_COOKIES_FROM_BROWSER` /
+  `DIDNTWATCH_COOKIES_FILE`).
 
 The fetching toolchain provisions itself into `.runtime/` on first run: the
 yt-dlp standalone build (~35 MB), the bgutil PO-token provider (built with
@@ -97,14 +99,14 @@ The repository root *is* the skill. Claude Code discovers skills in
 `~/.claude/skills/`, so install by cloning there:
 
 ```bash
-git clone https://github.com/<you>/tldw.git ~/.claude/skills/tldw
+git clone https://github.com/<you>/didntwatch.git ~/.claude/skills/didntwatch
 ```
 
 Or keep it in a dev folder and symlink it (edits stay in sync):
 
 ```bash
-git clone https://github.com/<you>/tldw.git ~/dev/tldw
-ln -s ~/dev/tldw ~/.claude/skills/tldw
+git clone https://github.com/<you>/didntwatch.git ~/dev/didntwatch
+ln -s ~/dev/didntwatch ~/.claude/skills/didntwatch
 ```
 
 That's it. The fetching toolchain bootstraps itself the first time the skill runs
@@ -115,14 +117,14 @@ new session) so it picks up the new skill.
 
 In any Claude Code session, just share a video and ask for a summary — the skill
 activates automatically (triggers work in English and Russian), or invoke it
-explicitly with `/tldw`.
+explicitly with `/didntwatch`.
 
 ```
 Summarize this video: https://youtu.be/8jPQjjsBbIc
 ```
 
 ```
-tldw https://www.youtube.com/watch?v=8jPQjjsBbIc — key points in Russian, short
+didntwatch https://www.youtube.com/watch?v=8jPQjjsBbIc — key points in Russian, short
 ```
 
 ```
@@ -273,7 +275,7 @@ transcripts are cached under `.cache/` (git-ignored).
 ## Project structure
 
 ```
-tldw/
+didntwatch/
 ├── SKILL.md            # skill manifest: triggers, workflow, formats, status→behavior
 ├── scripts/
 │   ├── transcript.py   # URL/id parsing, list/fetch/batch, status codes, caching, manifest

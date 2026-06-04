@@ -1,5 +1,5 @@
 ---
-name: tldw
+name: didntwatch
 description: |
   Summarize a YouTube video from its transcript/subtitles — "too long; didn't
   watch". The user gives a YouTube link (any format) or a bare video id and gets
@@ -10,8 +10,8 @@ description: |
   recap, extract key points, get timecodes, or otherwise understand a video
   without watching it. Especially on phrases like:
     - "что в этом видео", "сделай выжимку / краткое содержание / тезисы"
-    - "перескажи ролик", "о чём это видео", "tldw <ссылка>"
-    - "summarize this video", "tldr/tldw this", "key points / takeaways"
+    - "перескажи ролик", "о чём это видео", "didntwatch <ссылка>"
+    - "summarize this video", "tldr/tldw/didntwatch this", "key points / takeaways"
     - "what does this video say", "recap with timestamps"
   Also activate when the user pastes a transcript text and asks to summarize it.
 
@@ -33,7 +33,7 @@ allowed-tools:
   - Bash(*/scripts/transcript.sh:*)
 ---
 
-# tldw — too long; didn't watch
+# didntwatch — too long; didn't watch
 
 Turn a YouTube video into a summary from its **transcript** (subtitles). This
 skill does one hard thing well: it reliably pulls a clean transcript into the
@@ -304,7 +304,7 @@ no-fabrication rule applies.
 
 ## Examples
 
-- *"tldw https://youtu.be/dQw4w9WgXcQ"* → `fetch`, then key theses (default).
+- *"didntwatch https://youtu.be/dQw4w9WgXcQ"* → `fetch`, then key theses (default).
 - *"Перескажи это видео по разделам с тайм-кодами: <ссылка>"* → `fetch`, then
   sectioned recap with `?t=` deep links, in Russian.
 - *"Summarize in English, short: <shorts-url>"* → `fetch` (no `--lang`), then
@@ -399,7 +399,7 @@ The user should never get pinged for permission while you operate. The trick is
   allow-lists this script (`Bash(scripts/transcript.sh:*)` and
   `Bash(*/scripts/transcript.sh:*)`), so those calls run without a prompt.
 - **Avoid the `Read` tool on `.cache/*` and `.runtime/*`.** Those live inside the
-  skill folder (`~/.claude/skills/tldw/`), which is outside the user's project
+  skill folder (`~/.claude/skills/didntwatch/`), which is outside the user's project
   working directory, so opening them with `Read` is what triggers a prompt. Use
   `get` instead — same data, no prompt. (Moving the cache elsewhere does **not**
   help: there is no folder that is universally "no-permission"; the `Read` prompt
@@ -418,9 +418,9 @@ This folder *is* the skill. Claude Code discovers skills in `~/.claude/skills/`,
 so clone (or symlink) it there:
 
 ```bash
-git clone https://github.com/<you>/tldw.git ~/.claude/skills/tldw
+git clone https://github.com/<you>/didntwatch.git ~/.claude/skills/didntwatch
 # or, to develop elsewhere and symlink:
-ln -s /path/to/tldw ~/.claude/skills/tldw
+ln -s /path/to/didntwatch ~/.claude/skills/didntwatch
 ```
 
 The Python environment self-bootstraps on first run. See `README.md` for full docs.

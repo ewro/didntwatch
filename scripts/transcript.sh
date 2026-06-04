@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tldw bootstrap wrapper.
+# didntwatch bootstrap wrapper.
 #
 # transcript.py runs on the Python standard library alone; what it needs is the
 # fetching toolchain under .runtime/ :
@@ -27,7 +27,7 @@ BGUTIL_BUILD="$BGUTIL/server/build/generate_once.js"
 BGUTIL_TARBALL="https://github.com/Brainicism/bgutil-ytdlp-pot-provider/archive/refs/heads/master.tar.gz"
 NODE_DIR="$RUNTIME/node"
 
-log() { printf 'tldw: %s\n' "$1" >&2; }
+log() { printf 'didntwatch: %s\n' "$1" >&2; }
 
 # --- yt-dlp ------------------------------------------------------------------
 
