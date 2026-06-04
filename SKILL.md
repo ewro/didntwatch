@@ -418,7 +418,7 @@ This folder *is* the skill. Claude Code discovers skills in `~/.claude/skills/`,
 so clone (or symlink) it there:
 
 ```bash
-git clone https://github.com/<you>/didntwatch.git ~/.claude/skills/didntwatch
+git clone https://github.com/ewro/didntwatch.git ~/.claude/skills/didntwatch
 # or, to develop elsewhere and symlink:
 ln -s /path/to/didntwatch ~/.claude/skills/didntwatch
 ```

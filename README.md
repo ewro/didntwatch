@@ -99,13 +99,13 @@ The repository root *is* the skill. Claude Code discovers skills in
 `~/.claude/skills/`, so install by cloning there:
 
 ```bash
-git clone https://github.com/<you>/didntwatch.git ~/.claude/skills/didntwatch
+git clone https://github.com/ewro/didntwatch.git ~/.claude/skills/didntwatch
 ```
 
 Or keep it in a dev folder and symlink it (edits stay in sync):
 
 ```bash
-git clone https://github.com/<you>/didntwatch.git ~/dev/didntwatch
+git clone https://github.com/ewro/didntwatch.git ~/dev/didntwatch
 ln -s ~/dev/didntwatch ~/.claude/skills/didntwatch
 ```
 
