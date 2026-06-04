@@ -106,8 +106,10 @@ hunt through agent logs for something already cached.
 
 ## Install / run
 
-The helper script self-installs its dependency into a local venv on first run
-(uses `uv` if present, otherwise standard `venv`). No manual setup needed.
+The helper script self-provisions its fetching toolchain on first run (yt-dlp
+standalone + bgutil PO-token provider, plus a local Node runtime only if the
+system lacks `node` ≥ 18). No manual setup needed — expect a one-time download
+on the very first call.
 
 ```bash
 # from the skill folder

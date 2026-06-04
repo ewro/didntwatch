@@ -17,8 +17,10 @@ single numbered markdown report with a short summary per video.
 
 - Accepts every common YouTube link form (`watch?v=`, `youtu.be/`, `/shorts/`,
   `/embed/`, `/live/`, extra params like `&t=`) or a bare 11-character id.
-- Pulls the transcript via [`youtube-transcript-api`](https://pypi.org/project/youtube-transcript-api/),
-  including the list of available languages and per-segment timestamps.
+- Pulls the transcript via a bundled [`yt-dlp`](https://github.com/yt-dlp/yt-dlp)
+  toolchain with the [bgutil PO-token provider](https://github.com/Brainicism/bgutil-ytdlp-pot-provider),
+  browser cookies and TLS impersonation — including the list of available tracks
+  and per-segment timestamps.
 - Lets you choose the **output format** (key theses by default), **language**, and
   **length** of the summary.
 - Handles the awkward cases honestly: no subtitles, captions disabled, access
@@ -30,6 +32,21 @@ single numbered markdown report with a short summary per video.
 - **Never invents content.** The summary is grounded only in the transcript or the
   text you paste.
 
+## How it compares
+
+Plenty of tools turn a YouTube link into a summary. The difference is everything
+that happens around that:
+
+| | Typical transcript skill / summarizer | **tldw** |
+|---|---|---|
+| **Transcript fetching** | `youtube-transcript-api` (breaks against YouTube's PO-token wall and datacenter-IP blocks) or a paid transcript API | ✅ `yt-dlp` + `bgutil` PO-token provider + browser cookies + TLS impersonation — free, and survives YouTube's 2025–26 hardening |
+| **The summarizer** | a fixed prompt over a cheap API model, one shot | ✅ the agent itself — the summary is just the *first* turn; the transcript stays in context for follow-up Q&A, quotes, deep links |
+| **Failure handling** | "couldn't fetch" | ✅ an eight-status taxonomy (`ok`, `no_transcript`, `blocked`, `video_unavailable`, …), each mapped to a distinct behavior, plus a manual-paste fallback |
+| **Memory** | none — every question re-fetches | ✅ offline cache + lookup index: `find` recalls any seen video by title *or topic words inside the transcript*, months later, with zero network |
+| **Batch / scale** | none, or a naive per-video loop | ✅ built around the agent's context window: one throttled resumable fetch pass → slim manifest → map-reduce across sub-agents → a single numbered report |
+| **Languages** | whatever YouTube hands back, machine translations included | ✅ real tracks only (author-uploaded > original auto captions); the machine-translation endpoints are unreachable *by design* — the model translates while summarizing |
+| **Epistemics** | summary and opinion blended | ✅ a strict contract: the summary is transcript-only; commentary ("Claude's take") is opt-in, clearly labeled, and grounded with web checks |
+
 ## How it works
 
 The skill is deliberately lightweight, with a clean split of responsibilities:
@@ -37,7 +54,7 @@ The skill is deliberately lightweight, with a clean split of responsibilities:
 | Part | Responsibility |
 |------|----------------|
 | `scripts/transcript.py` | The *only* hard job — turn a URL/id into a clean transcript (text + timestamps + metadata) and print structured JSON. `batch` fetches many at once into the cache and writes a slim manifest. **No summarizing.** Caches each fetch to `.cache/`. |
-| `scripts/transcript.sh` | Self-installing bootstrap: creates an isolated Python env on first run and installs the one dependency. |
+| `scripts/transcript.sh` | Self-provisioning bootstrap: on first run downloads the yt-dlp standalone build and the bgutil PO-token provider into `.runtime/` (plus a local Node runtime if the system lacks node ≥ 18), then execs the fetcher. |
 | **Claude** | Everything "smart": the summary, follow-up Q&A, quotes, re-formatting, translation, and (in batch mode) building the report from the cache — all on top of the transcripts the script returns. |
 
 A summary is just the default *first* action. Because the transcript lands in the
@@ -55,14 +72,17 @@ still drill into any single video by reading its cached transcript.
 ## Requirements
 
 - **Claude Code** (the skill runs inside it).
-- **Python 3.9+**.
-- A package installer for the auto-bootstrap — any one of:
-  [`uv`](https://github.com/astral-sh/uv) (preferred, fastest), a Python build with
-  `ensurepip`/`venv`, or network access to bootstrap `pip` via `get-pip.py`.
+- **Python 3.9+** (standard library only — no pip packages).
+- **`curl` and `tar`** for the first-run toolchain download.
 - Network access to YouTube (the script fetches subtitles directly).
+- A browser with a YouTube login — cookies are what get past the bot wall
+  (Firefox by default; override with `TLDW_COOKIES_FROM_BROWSER` /
+  `TLDW_COOKIES_FILE`).
 
-The single runtime dependency (`youtube-transcript-api`) is installed automatically
-into a local `.venv/` on first run — no manual `pip install` needed.
+The fetching toolchain provisions itself into `.runtime/` on first run: the
+yt-dlp standalone build (~35 MB), the bgutil PO-token provider (built with
+`npm install` + `tsc`), and a local Node runtime (~30 MB) only if the system
+has no `node` ≥ 18. No manual setup needed.
 
 ## Installation
 
@@ -80,8 +100,9 @@ git clone https://github.com/<you>/tldw.git ~/dev/tldw
 ln -s ~/dev/tldw ~/.claude/skills/tldw
 ```
 
-That's it. The Python environment bootstraps itself the first time the skill runs.
-Restart Claude Code (or start a new session) so it picks up the new skill.
+That's it. The fetching toolchain bootstraps itself the first time the skill runs
+(expect a one-time download on the first call). Restart Claude Code (or start a
+new session) so it picks up the new skill.
 
 ## Usage
 
@@ -226,15 +247,17 @@ scripts/transcript.sh batch --input urls.txt --manifest manifest.json --lang ru
   datacenter IPs. Retry later, or use the manual-paste fallback.
 - **`no_transcript` / `transcript_disabled`:** the video genuinely has no captions —
   the skill won't guess its content. Paste a transcript if you have one.
-- **Dependency install fails:** ensure one of `uv`, `venv`+`ensurepip`, or network
-  access to `bootstrap.pypa.io` is available (see [Requirements](#requirements)).
+- **Toolchain provisioning fails:** check network access to `github.com` and
+  `nodejs.org`, and that `curl`/`tar` are installed (see
+  [Requirements](#requirements)). Re-running the command resumes provisioning —
+  it only downloads what is still missing.
 
 ## Privacy & security
 
 Everything runs locally on your machine. The script makes outbound requests only to
-YouTube (for subtitles) and YouTube's keyless oEmbed endpoint (for the video title).
-No transcript data is sent anywhere else; fetched transcripts are cached under
-`.cache/` (git-ignored).
+YouTube (for metadata and subtitles). Your browser's YouTube cookies are read
+locally to authenticate those requests and are sent nowhere else; fetched
+transcripts are cached under `.cache/` (git-ignored).
 
 ## Project structure
 
@@ -243,8 +266,8 @@ tldw/
 ├── SKILL.md            # skill manifest: triggers, workflow, formats, status→behavior
 ├── scripts/
 │   ├── transcript.py   # URL/id parsing, list/fetch/batch, status codes, caching, manifest
-│   └── transcript.sh   # self-installing venv bootstrap (uv → venv → get-pip)
-├── requirements.txt    # pinned: youtube-transcript-api
+│   └── transcript.sh   # self-provisioning bootstrap: downloads .runtime/, execs the fetcher
+├── .runtime/           # yt-dlp standalone + bgutil PO-token provider + Node (git-ignored)
 ├── README.md
 └── LICENSE
 ```
@@ -252,9 +275,9 @@ tldw/
 ## Contributing
 
 Issues and pull requests are welcome. The fetcher is intentionally small — keep
-summarization logic out of it; that belongs to Claude. When bumping
-`youtube-transcript-api`, verify the API still matches `scripts/transcript.py`
-(the 0.6.x and 1.x APIs differ).
+summarization logic out of it; that belongs to Claude. When updating the yt-dlp
+binary in `.runtime/`, re-check `_classify_stderr` in `scripts/transcript.py`
+against yt-dlp's current error strings.
 
 ## License
 
