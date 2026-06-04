@@ -80,7 +80,12 @@ still drill into any single video by reading its cached transcript.
 
 ## Requirements
 
-- **Claude Code** (the skill runs inside it).
+- **Claude Code** — the only harness this is tested in. The engine is a
+  standalone CLI and `SKILL.md` is a thin adapter, so any agentic harness that
+  can run shell tools should be able to drive it — Codex CLI, Cursor, Windsurf,
+  or fully local stacks (Goose / Aider / Open Interpreter with Ollama-served
+  open-weight models, for a pipeline where nothing leaves your machine) —
+  **untested**, expect to adapt the manifest.
 - **Python 3.9+** (standard library only — no pip packages).
 - **`curl` and `tar`** for the first-run toolchain download.
 - Network access to YouTube (the script fetches subtitles directly).
@@ -104,13 +109,6 @@ The repository root *is* the skill. Claude Code discovers skills in
 git clone https://github.com/ewro/didntwatch.git ~/.claude/skills/didntwatch
 ```
 
-Or keep it in a dev folder and symlink it (edits stay in sync):
-
-```bash
-git clone https://github.com/ewro/didntwatch.git ~/dev/didntwatch
-ln -s ~/dev/didntwatch ~/.claude/skills/didntwatch
-```
-
 That's it. The fetching toolchain bootstraps itself the first time the skill runs
 (expect a one-time download on the first call). Restart Claude Code (or start a
 new session) so it picks up the new skill.
@@ -122,15 +120,15 @@ activates automatically (triggers work in English and Russian), or invoke it
 explicitly with `/didntwatch`.
 
 ```
-Summarize this video: https://youtu.be/8jPQjjsBbIc
+Summarize this video: https://youtu.be/zjkBMFhNj_g
 ```
 
 ```
-didntwatch https://www.youtube.com/watch?v=8jPQjjsBbIc — key points in Russian, short
+didntwatch https://www.youtube.com/watch?v=zjkBMFhNj_g — key points in Russian, short
 ```
 
 ```
-Recap https://youtu.be/8jPQjjsBbIc by sections with timestamps
+Recap https://youtu.be/zjkBMFhNj_g by sections with timestamps
 ```
 
 For a **list of videos**, give several links (or a bookmarks file) and ask for a
@@ -163,27 +161,27 @@ You can run the fetcher directly; it prints JSON and never summarizes.
 
 ```bash
 # list available subtitle tracks
-scripts/transcript.sh list "https://youtu.be/8jPQjjsBbIc"
+scripts/transcript.sh list "https://youtu.be/zjkBMFhNj_g"
 
 # fetch the best real track (author-uploaded subtitles if any, else original auto captions)
-scripts/transcript.sh fetch "https://youtu.be/8jPQjjsBbIc"
+scripts/transcript.sh fetch "https://youtu.be/zjkBMFhNj_g"
 
 # prefer a specific language among the video's REAL tracks (never machine translations;
 # falls back to the best real track with `lang_fallback: true`)
-scripts/transcript.sh fetch "8jPQjjsBbIc" --lang ru
+scripts/transcript.sh fetch "zjkBMFhNj_g" --lang ru
 
 # viewer comments: top threads + uploader replies/hearts, no API key
 # (comment_count = the video's total, fetched_count = what you got)
-scripts/transcript.sh comments "8jPQjjsBbIc" --max 100 --sort top
+scripts/transcript.sh comments "zjkBMFhNj_g" --max 100 --sort top
 
 # batch: many videos into the cache + a manifest (slim JSONL on stdout)
 scripts/transcript.sh batch --input urls.txt --manifest manifest.json --lang ru
 scripts/transcript.sh batch "<url1>" "<url2>" ...   # ids/urls as args too
 
 # recall from the cache — offline, no network or runtime needed
-scripts/transcript.sh find "родительское поведение страхи"   # find a cached transcript by id/url/title/topic
-scripts/transcript.sh get  "8jPQjjsBbIc" --lang ru           # print a cached transcript's text (--json for full record)
-scripts/transcript.sh reindex                                # rebuild .cache/index.json from the cache
+scripts/transcript.sh find "prompt injection jailbreaks"   # find a cached transcript by id/url/title/topic
+scripts/transcript.sh get  "zjkBMFhNj_g"                   # print a cached transcript's text (--json for full record)
+scripts/transcript.sh reindex                              # rebuild .cache/index.json from the cache
 ```
 
 `find` matches the query against cached **titles/authors** first, then falls back
@@ -197,17 +195,18 @@ video you've already summarized never re-hits YouTube.
 ```json
 {
   "status": "ok",
-  "video_id": "8jPQjjsBbIc",
-  "url": "https://youtu.be/8jPQjjsBbIc",
-  "title": "How to stay calm when you know you'll be stressed | Daniel Levitin | TED",
-  "author": "TED",
+  "video_id": "zjkBMFhNj_g",
+  "url": "https://youtu.be/zjkBMFhNj_g",
+  "title": "[1hr Talk] Intro to Large Language Models",
+  "author": "Andrej Karpathy",
   "language_code": "en",
-  "is_generated": false,
-  "available_tracks": [ { "language": "English", "language_code": "en", "...": "..." } ],
-  "segment_count": 260,
-  "text": "A few years ago, I broke into my own house...",
-  "segments": [ { "start": 13.24, "dur": 2.56, "text": "A few years ago,..." } ],
-  "cache_file": ".cache/8jPQjjsBbIc.en.json"
+  "is_generated": true,
+  "available_tracks": [ { "language": "English (Original)", "language_code": "en-orig", "...": "..." } ],
+  "segment_count": 1704,
+  "comment_count": 4900,
+  "text": "hi everyone so recently I gave a 30-minute talk on large language models...",
+  "segments": [ { "start": 0.16, "dur": 4.08, "text": "hi everyone so recently I gave a" } ],
+  "cache_file": ".cache/zjkBMFhNj_g.en.json"
 }
 ```
 
@@ -272,10 +271,17 @@ scripts/transcript.sh batch --input urls.txt --manifest manifest.json --lang ru
 
 ## Privacy & security
 
-Everything runs locally on your machine. The script makes outbound requests only to
-YouTube (for metadata and subtitles). Your browser's YouTube cookies are read
-locally to authenticate those requests and are sent nowhere else; fetched
-transcripts are cached under `.cache/` (git-ignored).
+**Fetching is local.** The script makes outbound requests only to YouTube (for
+metadata and subtitles). Your browser's YouTube cookies are read locally to
+authenticate those requests and are sent nowhere else; fetched transcripts are
+cached under `.cache/` (git-ignored).
+
+**Summarizing is your agent's model at work.** When you ask for a summary or a
+follow-up, the transcript and your questions become part of the model
+conversation — they travel to whatever LLM your agent runs on (for Claude Code,
+the Anthropic API) under that provider's data terms. If that matters for your
+content, pair the engine with a local-model harness and nothing leaves your
+machine at all.
 
 ## Project structure
 
