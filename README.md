@@ -116,7 +116,7 @@ new session) so it picks up the new skill.
 ## Usage
 
 In any Claude Code session, just share a video and ask for a summary — the skill
-activates automatically (triggers work in English and Russian), or invoke it
+activates automatically (in any language you write), or invoke it
 explicitly with `/didntwatch`.
 
 ```

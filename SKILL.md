@@ -13,6 +13,9 @@ description: |
     - "перескажи ролик", "о чём это видео", "didntwatch <ссылка>"
     - "summarize this video", "tldr/tldw/didntwatch this", "key points / takeaways"
     - "what does this video say", "recap with timestamps"
+  The phrases above are examples, not a whitelist — activate on an equivalent
+  request in ANY language (German, Spanish, Japanese, …) and reply in the
+  user's language.
   Also activate when the user pastes a transcript text and asks to summarize it.
 
   ALSO ACTIVATE in BATCH mode when there is more than one video: several links at
