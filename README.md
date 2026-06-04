@@ -3,8 +3,8 @@
 *Too long; didn't watch.*
 
 A [Claude Code](https://claude.com/claude-code) **Agent Skill** that summarizes a
-YouTube video from its transcript (subtitles). Give Claude a YouTube link — in any
-common format — or a bare video id, and get a summary without watching the video.
+YouTube video from its transcript (subtitles). Give Claude a YouTube link and get
+a summary without watching the video.
 The transcript then stays in the conversation, so you can ask follow-up questions,
 pull quotes, or switch the summary format.
 
@@ -25,6 +25,10 @@ single numbered markdown report with a short summary per video.
   and per-segment timestamps.
 - Lets you choose the **output format** (key theses by default), **language**, and
   **length** of the summary.
+- **Gives its own take — on request, and clearly separated.** The summary is
+  strictly what the video says; ask for commentary and Claude appraises it:
+  claim-by-claim verdicts, checked against the web, labeled as its own
+  judgment — never blended into the summary.
 - **Analyzes viewer comments on request** — top threads with uploader
   replies/hearts, fetched through the same toolchain (no YouTube API key):
   corrections and pushback, dominant themes, what the author confirmed.
@@ -119,16 +123,27 @@ In any Claude Code session, just share a video and ask for a summary — the ski
 activates automatically (in any language you write), or invoke it
 explicitly with `/didntwatch`.
 
-```
-Summarize this video: https://youtu.be/zjkBMFhNj_g
-```
+The summary is only the opening move — the video stays in the conversation,
+so a full session reads like this:
 
-```
-didntwatch https://www.youtube.com/watch?v=zjkBMFhNj_g — key points in Russian, short
-```
+```text
+You:  Summarize this video: https://youtu.be/zjkBMFhNj_g
+      → key theses of the hour-long talk, in your language
 
-```
-Recap https://youtu.be/zjkBMFhNj_g by sections with timestamps
+You:  What does he say about jailbreaks and prompt injection?
+      → answers with quotes — no re-fetching
+
+You:  Recap the whole talk by sections, with timestamps
+      → topical sections, each with a deep link like youtu.be/…?t=1234
+
+You:  Now your take — how well has this aged?
+      → "Claude's take": claim-by-claim verdicts, checked against the web,
+        clearly separated from what the video itself says
+
+You:  And what do the viewers think? Anyone pushing back?
+      → comment analysis: corrections and disputes first, then what the
+        author replied to and hearted, dominant themes — honestly framed
+        as "top N of the video's M comments"
 ```
 
 For a **list of videos**, give several links (or a bookmarks file) and ask for a
