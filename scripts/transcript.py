@@ -1288,16 +1288,9 @@ def cmd_subs_commit(at: float) -> dict:
     Pass the `checked_at` from the `subs` record so videos uploaded between the
     scan and the commit are not skipped (they simply re-surface next run).
     """
-    state = _load_subs_state()
-    state["last_run_epoch"] = int(at)
-    state["last_run_iso"] = _iso(at)
-    state.pop("seen_ids", None)  # retire the old seen-id model if present
+    state = {"last_run_epoch": int(at), "last_run_iso": _iso(at)}
     _save_subs_state(state)
-    return {
-        "status": "ok",
-        "last_run_iso": state["last_run_iso"],
-        "last_run_epoch": state["last_run_epoch"],
-    }
+    return {"status": "ok", **state}
 
 
 # --- CLI ---------------------------------------------------------------------
