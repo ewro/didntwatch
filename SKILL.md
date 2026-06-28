@@ -129,9 +129,9 @@ scripts/transcript.sh batch "<url1>" "<url2>" ...          # ids/urls as args to
 
 # subscription digest (NEW videos in the signed-in user's feed; needs cookies):
 scripts/transcript.sh subs                                 # new since last run (first run: 24h, ≤20)
-scripts/transcript.sh subs --days 3                        # widen the window (probes upload dates)
+scripts/transcript.sh subs --days 3                        # widen the cutoff (last 3 days)
 scripts/transcript.sh subs --since 2026-06-25 --max 40     # explicit cutoff + cap
-scripts/transcript.sh subs-commit --ids id1,id2,...        # mark surfaced + advance last-run (offline)
+scripts/transcript.sh subs-commit --at 1782632877          # advance last-run to a checked_at (offline)
 
 # recall from cache (offline — no network, no runtime needed):
 scripts/transcript.sh find "<id|url|title words|topic>"    # locate a CACHED transcript
@@ -428,14 +428,14 @@ Mechanics — discovery is the only new part; everything after reuses Batch:
 
 1. **Discover.** `scripts/transcript.sh subs` (needs the user's browser cookies —
    `:ytsubscriptions` is signed-in only). It prints a JSON record:
-   `{status, mode, cutoff_iso, last_run_iso, feed_listed, seen_known, new_count,
-   new:[{id,url,...}]}`. It is **read-only on state** — it does not mark anything
-   surfaced, so a failed digest never loses videos.
-   - Default window = **everything new since the last commit**, decided by a
-     seen-id set (the flat feed carries no per-entry dates, so date math is
-     unreliable; seen-ids are not). First ever run = the **last 24h, capped at
-     20** (so a fresh state doesn't dump the whole feed). Override with
-     `--days N` / `--since YYYY-MM-DD` (these probe upload dates) and `--max`.
+   `{status, mode, cutoff_iso, last_run_iso, checked_at, feed_listed, probed,
+   new_count, new:[{id,url,timestamp,upload_date}]}`. It is **read-only on
+   state** — it does not advance anything, so a failed digest never loses videos.
+   - The model is **one remembered timestamp**: "new" = uploaded after the last
+     run. The flat feed has no dates, so `subs` probes upload times newest-first
+     in waves and stops once a whole wave is older than the cutoff (`probed` ≪
+     `feed_listed` in practice). First ever run = the **last 24h, capped at 20**.
+     Override the cutoff with `--days N` / `--since YYYY-MM-DD`, cap with `--max`.
    - On `status: blocked` mentioning sign-in → cookies expired; tell the user to
      re-open youtube.com in their browser (see *No browser login*), then retry.
 2. **Fetch + summarize.** Take the `new` ids → `batch --manifest …` → fan out
@@ -443,9 +443,10 @@ Mechanics — discovery is the only new part; everything after reuses Batch:
    records already carry `title`/`author`/`url`). Same **"Couldn't process"**
    section for non-`ok`.
 3. **Commit last.** Only *after* the digest is delivered, run
-   `scripts/transcript.sh subs-commit --ids <all discovered ids>` (offline) to
-   mark them surfaced and advance `last_run`. Commit **all** discovered ids, not
-   just `ok` ones — otherwise a no-subtitle video re-appears every morning.
+   `scripts/transcript.sh subs-commit --at <checked_at>` (offline) — pass the
+   `checked_at` from the `subs` record so the cutoff advances to the moment of
+   the scan (videos uploaded between scan and commit simply re-surface next run,
+   never get skipped). No id list: the timestamp alone is the state.
 
 **Output contract (differs from Batch's default):** the digest goes to the
 **console by default**. Write a file **only** when the user explicitly says so
@@ -453,8 +454,8 @@ Mechanics — discovery is the only new part; everything after reuses Batch:
 **current directory** (unless they give a path). Report format = the Batch
 **Default report format** above, in the user's language.
 
-State lives in `.cache/subs_state.json` (`seen_ids` + `last_run_iso`). Wiping the
-cache resets the digest to a first run.
+State lives in `.cache/subs_state.json` — just `{last_run_epoch, last_run_iso}`,
+machine-local (gitignored). Deleting it resets the digest to a first run.
 
 ## Permissions — keeping it prompt-free
 

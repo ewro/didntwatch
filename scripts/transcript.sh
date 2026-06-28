@@ -17,7 +17,7 @@
 #   scripts/transcript.sh fetch <url|id> [--lang xx]
 #   scripts/transcript.sh list|get|find|batch|reindex ...
 #   scripts/transcript.sh subs [--days N | --since YYYY-MM-DD] [--limit K] [--max M]
-#   scripts/transcript.sh subs-commit --ids id1,id2,...
+#   scripts/transcript.sh subs-commit [--at <unix-epoch>]
 
 set -euo pipefail
 

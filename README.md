@@ -195,8 +195,8 @@ scripts/transcript.sh batch "<url1>" "<url2>" ...   # ids/urls as args too
 
 # subscription digest: NEW videos in your signed-in feed (needs browser cookies)
 scripts/transcript.sh subs                          # new since last run (first run: last 24h, ≤20)
-scripts/transcript.sh subs --days 3 --max 40        # widen the window (probes upload dates)
-scripts/transcript.sh subs-commit --ids id1,id2     # mark surfaced + advance last-run (offline)
+scripts/transcript.sh subs --days 3 --max 40        # widen the cutoff (last 3 days)
+scripts/transcript.sh subs-commit --at 1782632877   # advance last-run to a checked_at (offline)
 
 # recall from the cache — offline, no network or runtime needed
 scripts/transcript.sh find "prompt injection jailbreaks"   # find a cached transcript by id/url/title/topic
@@ -266,30 +266,32 @@ scripts/transcript.sh batch --input urls.txt --manifest manifest.json --lang ru
 
 A digest of **new uploads in your own subscription feed** is just batch mode with
 discovery on the front. `subs` lists the signed-in feed (`:ytsubscriptions` —
-**requires your browser cookies**) and returns only the videos you haven't seen
-yet; you then `batch` + summarize them, and `subs-commit` records what was shown.
+**requires your browser cookies**) and returns only uploads newer than your last
+run; you then `batch` + summarize them, and `subs-commit` advances the timestamp.
 
 ```bash
-scripts/transcript.sh subs                      # JSON: { new: [{id,url,...}], ... }
-scripts/transcript.sh subs --days 3 --max 40    # explicit window instead of "since last run"
-scripts/transcript.sh subs-commit --ids a,b,c   # offline: mark surfaced, advance last-run
+scripts/transcript.sh subs                      # JSON: { new: [{id,url,timestamp,...}], checked_at, ... }
+scripts/transcript.sh subs --days 3 --max 40    # explicit cutoff instead of "since last run"
+scripts/transcript.sh subs-commit --at <epoch>  # offline: store last-run (pass subs' checked_at)
 ```
 
 | Flag | Default | What it does |
 |------|---------|--------------|
-| `--days <n>` | — | Window: only uploads newer than N days (probes per-video dates). |
-| `--since <YYYY-MM-DD>` | — | Window: only uploads on/after this date. |
+| `--days <n>` | — | Cutoff: only uploads newer than N days ago. |
+| `--since <YYYY-MM-DD>` | — | Cutoff: only uploads on/after this date. |
 | `--limit <k>` | `80` | How many feed entries to scan, newest-first. |
 | `--max <m>` | all / `20` first run | Cap the number of new videos returned. |
 
-- **`subs` is read-only on state** — it never marks anything surfaced, so a digest
-  that fails midway loses nothing. Advancing state is the separate, offline
-  `subs-commit` step (run it *after* the digest is delivered; pass **all**
-  discovered ids so a no-subtitle video doesn't re-appear daily).
-- **Default window = "since last run"**, tracked by a seen-id set in
-  `.cache/subs_state.json` (the flat feed exposes no per-entry dates, so seen-ids
-  are more reliable than date math). First ever run falls back to the last 24h,
-  capped at 20.
+- **One remembered timestamp.** "New" = uploaded after the last run, stored as
+  `{last_run_epoch, last_run_iso}` in `.cache/subs_state.json` (machine-local,
+  gitignored). The flat feed carries no dates, so `subs` probes upload times
+  newest-first **in waves and stops once a wave is all older than the cutoff** —
+  so it typically dates only a handful of entries, not the whole feed. First ever
+  run (no timestamp) falls back to the last 24h, capped at 20.
+- **`subs` is read-only on state** — a digest that fails midway loses nothing.
+  Advancing the timestamp is the separate, offline `subs-commit --at <epoch>`
+  step; pass the `checked_at` from the `subs` record so uploads landing between
+  the scan and the commit re-surface next run instead of being skipped.
 - Cookies expired → `subs` returns `status: blocked` asking for sign-in; re-open
   youtube.com in your browser and retry.
 
