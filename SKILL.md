@@ -127,6 +127,12 @@ scripts/transcript.sh comments "<youtube-url-or-id>" [--max 100] [--sort top|new
 scripts/transcript.sh batch --input urls.txt --manifest manifest.json [--lang ru]
 scripts/transcript.sh batch "<url1>" "<url2>" ...          # ids/urls as args too
 
+# subscription digest (NEW videos in the signed-in user's feed; needs cookies):
+scripts/transcript.sh subs                                 # new since last run (first run: 24h, ≤20)
+scripts/transcript.sh subs --days 3                        # widen the window (probes upload dates)
+scripts/transcript.sh subs --since 2026-06-25 --max 40     # explicit cutoff + cap
+scripts/transcript.sh subs-commit --ids id1,id2,...        # mark surfaced + advance last-run (offline)
+
 # recall from cache (offline — no network, no runtime needed):
 scripts/transcript.sh find "<id|url|title words|topic>"    # locate a CACHED transcript
 scripts/transcript.sh get  "<url-or-id>" [--lang ru]       # print a CACHED transcript
@@ -411,14 +417,54 @@ short summary of each, save to `./yt/2026-spring.md` with numbering and links."*
 manifest.json` → fan out sub-agents over the `ok` chunks → stitch the numbered
 report + a "Couldn't process" section.
 
+## Subscriptions digest (the signed-in user's feed → one report)
+
+Triggers: *"утренний дайджест", "что нового у меня в подписках", "сделай дайджест
+по фиду", "morning digest", "what's new in my subscriptions"*. This is a
+**batch over discovery** — the feed supplies the targets instead of a link list.
+**Manual-run only** (the user asks each time); no auto-scheduling from here.
+
+Mechanics — discovery is the only new part; everything after reuses Batch:
+
+1. **Discover.** `scripts/transcript.sh subs` (needs the user's browser cookies —
+   `:ytsubscriptions` is signed-in only). It prints a JSON record:
+   `{status, mode, cutoff_iso, last_run_iso, feed_listed, seen_known, new_count,
+   new:[{id,url,...}]}`. It is **read-only on state** — it does not mark anything
+   surfaced, so a failed digest never loses videos.
+   - Default window = **everything new since the last commit**, decided by a
+     seen-id set (the flat feed carries no per-entry dates, so date math is
+     unreliable; seen-ids are not). First ever run = the **last 24h, capped at
+     20** (so a fresh state doesn't dump the whole feed). Override with
+     `--days N` / `--since YYYY-MM-DD` (these probe upload dates) and `--max`.
+   - On `status: blocked` mentioning sign-in → cookies expired; tell the user to
+     re-open youtube.com in their browser (see *No browser login*), then retry.
+2. **Fetch + summarize.** Take the `new` ids → `batch --manifest …` → fan out
+   sub-agents over the `ok` records exactly as in Batch workflow (the manifest
+   records already carry `title`/`author`/`url`). Same **"Couldn't process"**
+   section for non-`ok`.
+3. **Commit last.** Only *after* the digest is delivered, run
+   `scripts/transcript.sh subs-commit --ids <all discovered ids>` (offline) to
+   mark them surfaced and advance `last_run`. Commit **all** discovered ids, not
+   just `ok` ones — otherwise a no-subtitle video re-appears every morning.
+
+**Output contract (differs from Batch's default):** the digest goes to the
+**console by default**. Write a file **only** when the user explicitly says so
+("запиши в файл" / "save to a file"); then use `yt-digest-YYYY-MM-DD.md` in the
+**current directory** (unless they give a path). Report format = the Batch
+**Default report format** above, in the user's language.
+
+State lives in `.cache/subs_state.json` (`seen_ids` + `last_run_iso`). Wiping the
+cache resets the digest to a first run.
+
 ## Permissions — keeping it prompt-free
 
 The user should never get pinged for permission while you operate. The trick is
 **one entry point, one allow rule**:
 
 - **Do everything through `scripts/transcript.sh`.** `fetch`, `find`, `get`,
-  `batch`, `list`, `reindex` all print what you need to stdout, so you almost
-  never need the `Read` tool on internal files. The frontmatter already
+  `batch`, `list`, `reindex`, `subs`, `subs-commit` all print what you need to
+  stdout, so you almost never need the `Read` tool on internal files (including
+  `.cache/subs_state.json`). The frontmatter already
   allow-lists this script (`Bash(scripts/transcript.sh:*)` and
   `Bash(*/scripts/transcript.sh:*)`), so those calls run without a prompt.
 - **Avoid the `Read` tool on `.cache/*` and `.runtime/*`.** Those live inside the

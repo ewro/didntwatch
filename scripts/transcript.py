@@ -11,6 +11,8 @@ Modes:
   fetch <url|id> [--lang xx]  -> one transcript (text + timestamped segments)
   comments <url|id>           -> viewer comments via InnerTube (no API key)
   batch [targets...]          -> many transcripts into the cache + a manifest
+  subs                        -> NEW videos in your subscription feed (discovery)
+  subs-commit --ids a,b,...   -> mark ids surfaced + advance last-run (offline)
 
 `fetch`/`list` print a single JSON object to stdout. `batch` prints one slim
 JSON object per line (JSONL) and keeps the heavy transcript only in the cache.
@@ -40,6 +42,7 @@ import sys
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -47,6 +50,10 @@ CACHE_DIR = SKILL_DIR / ".cache"
 # Lightweight, greppable map id.lang -> {title, author, cache_file, ...} so a
 # transcript can be found by title/topic/url without opening every big JSON.
 INDEX_FILE = CACHE_DIR / "index.json"
+# Subscriptions-digest state: the last-run timestamp and the set of video ids
+# already surfaced, so "new since last run" is robust to the feed having no
+# per-entry dates (flat :ytsubscriptions returns ids only).
+SUBS_STATE_FILE = CACHE_DIR / "subs_state.json"
 RUNTIME_DIR = SKILL_DIR / ".runtime"
 YTDLP_BIN = RUNTIME_DIR / "bin" / "yt-dlp"
 NODE_BIN_DIR = RUNTIME_DIR / "node" / "bin"
@@ -1066,6 +1073,230 @@ def cmd_batch(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- subscriptions digest ----------------------------------------------------
+
+# How many seen ids we keep around. Plenty for a daily digest; bounds the file.
+_SEEN_IDS_CAP = 2000
+# First-ever run (no state): only the last 24h, capped, so we don't dump the
+# entire feed of low-frequency channels as "new".
+_FIRST_RUN_WINDOW_S = 24 * 3600
+_FIRST_RUN_MAX = 20
+# For a date window we probe per-video upload times. The feed is only roughly
+# reverse-chronological, so we can't reliably "stop at the first old one";
+# instead we probe the newest N unseen entries in parallel and filter. This
+# bounds both cost and wall-clock.
+_DATE_PROBE_CAP = 50
+_DATE_PROBE_WORKERS = 6
+
+
+def _load_subs_state() -> dict:
+    try:
+        data = json.loads(SUBS_STATE_FILE.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def _save_subs_state(state: dict) -> None:
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    SUBS_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _parse_since(since: str) -> float | None:
+    """Parse --since: a date (YYYY-MM-DD), full ISO timestamp, or YYYYMMDD."""
+    s = (since or "").strip()
+    if not s:
+        return None
+    for parse in (
+        lambda v: datetime.fromisoformat(v),
+        lambda v: datetime.strptime(v, "%Y-%m-%d"),
+        lambda v: datetime.strptime(v, "%Y%m%d"),
+    ):
+        try:
+            dt = parse(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.timestamp()
+        except ValueError:
+            continue
+    return None
+
+
+def _list_subscriptions(limit: int) -> tuple[list[str], dict | None]:
+    """Flat-list the signed-in user's subscription feed → ordered video ids.
+
+    The feed comes back newest-first. Flat mode yields ids only (no dates), so
+    "new" is decided against the seen-id set, not timestamps. Returns
+    (ids, error) where error is a {status, message} dict on failure.
+    """
+    proc = _run_ytdlp(
+        [
+            "--flat-playlist",
+            "--no-warnings",
+            "--playlist-end",
+            str(max(1, limit)),
+            "--print",
+            "%(id)s",
+            ":ytsubscriptions",
+        ],
+        timeout=180,
+    )
+    if proc.returncode != 0:
+        status, message = _classify_stderr(proc.stderr)
+        return [], {"status": status, "message": message}
+    ids: list[str] = []
+    seen: set[str] = set()
+    for line in (proc.stdout or "").splitlines():
+        line = line.strip()
+        if _ID_RE.match(line) and line not in seen:
+            seen.add(line)
+            ids.append(line)
+    return ids, None
+
+
+def _probe_upload_ts(video_id: str) -> float | None:
+    """Best-effort upload time (unix epoch) for one video via a metadata probe.
+
+    Falls back to upload_date (YYYYMMDD, midnight UTC) when timestamp is absent.
+    """
+    proc = _run_ytdlp(
+        [
+            "--skip-download",
+            "--ignore-no-formats-error",
+            "--no-warnings",
+            "--print",
+            "%(timestamp)s\t%(upload_date)s",
+            f"https://youtu.be/{video_id}",
+        ],
+        timeout=60,
+    )
+    if proc.returncode != 0:
+        return None
+    line = (proc.stdout or "").strip().splitlines()
+    if not line:
+        return None
+    ts_raw, _, date_raw = line[0].partition("\t")
+    ts_raw, date_raw = ts_raw.strip(), date_raw.strip()
+    if ts_raw and ts_raw != "NA":
+        try:
+            return float(ts_raw)
+        except ValueError:
+            pass
+    if date_raw and date_raw != "NA":
+        try:
+            return datetime.strptime(date_raw, "%Y%m%d").replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            pass
+    return None
+
+
+def cmd_subs(args: argparse.Namespace) -> dict:
+    """Discover NEW videos in the subscription feed. Read-only on state.
+
+    Default: everything not yet surfaced (seen-id delta) since the last commit.
+    First ever run: the last 24h, capped. Override with --days / --since (date
+    window, resolved per-video). The caller summarizes the result, then calls
+    `subs-commit --ids ...` to advance the state.
+    """
+    state = _load_subs_state()
+    seen = set(state.get("seen_ids", []))
+    last_run_iso = state.get("last_run_iso")
+    now = time.time()
+
+    ids, err = _list_subscriptions(args.limit)
+    if err is not None:
+        return {"status": err["status"], "message": err["message"]}
+
+    # Resolve the window.
+    cutoff: float | None = None
+    if args.since:
+        cutoff = _parse_since(args.since)
+        if cutoff is None:
+            return {"status": "error", "message": f"Could not parse --since {args.since!r} (use YYYY-MM-DD)."}
+        mode = "window"
+    elif args.days is not None:
+        cutoff = now - args.days * 86400
+        mode = "window"
+    elif not state:
+        cutoff = now - _FIRST_RUN_WINDOW_S
+        mode = "first_run_24h"
+    else:
+        mode = "since_last_run"
+
+    cap = args.max if args.max is not None else (_FIRST_RUN_MAX if mode == "first_run_24h" else 0)
+
+    new: list[dict] = []
+    if cutoff is None:
+        # Seen-id delta: anything in the feed we have not surfaced before.
+        for vid in ids:
+            if vid in seen:
+                continue
+            new.append({"id": vid, "url": f"https://youtu.be/{vid}"})
+            if cap and len(new) >= cap:
+                break
+    else:
+        # Date window: probe upload times of the newest unseen entries in
+        # parallel (bounded), then keep those inside the window, newest-first.
+        candidates = [v for v in ids if v not in seen][:_DATE_PROBE_CAP]
+        with ThreadPoolExecutor(max_workers=_DATE_PROBE_WORKERS) as pool:
+            stamps = list(pool.map(_probe_upload_ts, candidates))
+        dated = [(v, ts) for v, ts in zip(candidates, stamps) if ts is not None and ts >= cutoff]
+        dated.sort(key=lambda vt: vt[1], reverse=True)
+        for vid, ts in dated:
+            new.append(
+                {
+                    "id": vid,
+                    "url": f"https://youtu.be/{vid}",
+                    "timestamp": int(ts),
+                    "upload_date": _iso(ts),
+                }
+            )
+            if cap and len(new) >= cap:
+                break
+
+    return {
+        "status": "ok",
+        "mode": mode,
+        "cutoff_iso": _iso(cutoff) if cutoff is not None else None,
+        "last_run_iso": last_run_iso,
+        "feed_listed": len(ids),
+        "seen_known": len(seen),
+        "new_count": len(new),
+        "new": new,
+    }
+
+
+def cmd_subs_commit(ids: list[str]) -> dict:
+    """Mark ids as surfaced and advance last_run. Offline — no network."""
+    clean = [v for v in ids if _ID_RE.match(v)]
+    state = _load_subs_state()
+    prev = state.get("seen_ids", [])
+    # Newest ids first, de-duplicated, capped.
+    merged: list[str] = []
+    seen: set[str] = set()
+    for vid in clean + list(prev):
+        if vid not in seen:
+            seen.add(vid)
+            merged.append(vid)
+    now = time.time()
+    state["seen_ids"] = merged[:_SEEN_IDS_CAP]
+    state["last_run_iso"] = _iso(now)
+    state["last_run_epoch"] = int(now)
+    _save_subs_state(state)
+    return {
+        "status": "ok",
+        "committed": len(clean),
+        "seen_total": len(state["seen_ids"]),
+        "last_run_iso": state["last_run_iso"],
+    }
+
+
 # --- CLI ---------------------------------------------------------------------
 
 
@@ -1136,6 +1367,28 @@ def main(argv: list[str]) -> int:
     p_batch.add_argument("--refresh", action="store_true", help="re-fetch even if a cache file exists")
     _add_cookie_args(p_batch)
 
+    p_subs = sub.add_parser(
+        "subs", help="discover NEW videos in your YouTube subscription feed (read-only on state)"
+    )
+    p_subs.add_argument(
+        "--days", type=float, default=None, help="window: only videos newer than N days (probes dates)"
+    )
+    p_subs.add_argument(
+        "--since", default=None, help="window: only videos on/after this date (YYYY-MM-DD)"
+    )
+    p_subs.add_argument(
+        "--limit", type=int, default=80, help="how many feed entries to scan, newest-first (default: 80)"
+    )
+    p_subs.add_argument(
+        "--max", type=int, default=None, help="cap the number of new videos returned (default: all / 20 on first run)"
+    )
+    _add_cookie_args(p_subs)
+
+    p_commit = sub.add_parser(
+        "subs-commit", help="mark video ids as surfaced + advance last-run (offline)"
+    )
+    p_commit.add_argument("--ids", required=True, help="comma-separated video ids to mark as surfaced")
+
     # Offline cache tools — no network, no runtime needed.
     p_find = sub.add_parser(
         "find", help="locate a CACHED transcript by id/url or title/topic fragment"
@@ -1156,6 +1409,10 @@ def main(argv: list[str]) -> int:
     # Offline subcommands first: they read only the local cache.
     if args.cmd == "reindex":
         print(json.dumps(cmd_reindex(), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "subs-commit":
+        ids = [s.strip() for s in (args.ids or "").split(",") if s.strip()]
+        print(json.dumps(cmd_subs_commit(ids), ensure_ascii=False, indent=2))
         return 0
     if args.cmd == "find":
         print(json.dumps(cmd_find(args.query, args.lang, args.limit), ensure_ascii=False, indent=2))
@@ -1197,6 +1454,10 @@ def main(argv: list[str]) -> int:
 
     if args.cmd == "batch":
         return cmd_batch(args)
+
+    if args.cmd == "subs":
+        print(json.dumps(cmd_subs(args), ensure_ascii=False, indent=2))
+        return 0
 
     video_id = extract_video_id(args.target)
     if not video_id:
