@@ -15,6 +15,10 @@ single numbered markdown report with a short summary per video.
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
 ![Python 3.9+](https://img.shields.io/badge/Python-3.9%2B-blue.svg)
 
+<!-- DEMO: replace with the asciinema link/GIF once recorded, e.g.
+[![asciicast](https://asciinema.org/a/REPLACE.svg)](https://asciinema.org/a/REPLACE)
+-->
+
 ## Usage
 
 In any Claude Code session ([installation](#installation) is one `git clone`),

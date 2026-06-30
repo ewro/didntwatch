@@ -114,8 +114,17 @@ standalone + bgutil PO-token provider, plus a local Node runtime only if the
 system lacks `node` ≥ 18). No manual setup needed — expect a one-time download
 on the very first call.
 
+**Always call the script by its ABSOLUTE path** — prepend this skill's base
+directory (shown as "Base directory for this skill: …" when the skill loads) to
+every `scripts/transcript.sh` command below. The examples are written with a bare
+relative path for brevity, but your working directory is the **user's project,
+not the skill folder** (and you must not `cd` into it — see *Permissions*), so a
+relative path fails with `No such file or directory`. The absolute form is still
+prompt-free because the allow-list rule `Bash(*/scripts/transcript.sh:*)` matches
+it. Example: `/home/you/.claude/skills/didntwatch/scripts/transcript.sh fetch "<url>"`.
+
 ```bash
-# from the skill folder
+# prepend the skill base dir to each line — paths shown relative for brevity
 scripts/transcript.sh list  "<youtube-url-or-id>"          # what tracks exist
 scripts/transcript.sh fetch "<youtube-url-or-id>"          # best real track (manual > original auto)
 scripts/transcript.sh fetch "<youtube-url-or-id>" --lang ru # prefer a specific REAL track (rare)
@@ -144,8 +153,8 @@ Accepts every common link form (`watch?v=`, `youtu.be/`, `/shorts/`, `/embed/`,
 
 ## Workflow
 
-1. **Get the transcript.** Run `scripts/transcript.sh fetch "<input>"` — no
-   `--lang`. It returns the video's best real track (author-uploaded subtitles
+1. **Get the transcript.** Run `<skill-base-dir>/scripts/transcript.sh fetch
+   "<input>"` — absolute path (see *Install / run*), no `--lang`. It returns the video's best real track (author-uploaded subtitles
    if any, else the original auto captions), prints JSON and caches it to
    `.cache/<id>.<lang>.json`. The **summary language is your job**, not the
    transcript's: you summarize an English transcript in Russian (or any
@@ -475,9 +484,13 @@ The user should never get pinged for permission while you operate. The trick is
   help: there is no folder that is universally "no-permission"; the `Read` prompt
   depends on the session's working directories, which differ per project. The fix
   is routing through the allow-listed script, not relocating files.)
-- **Don't `cd` into the skill folder.** Call the script by the path the skill
-  gives you (`scripts/transcript.sh ...`); a `cd ~/.claude/... && ...` compound
-  command reads as a different, non-allow-listed command and can prompt.
+- **Don't `cd` into the skill folder — use the absolute path instead.** Call the
+  script as `<skill-base-dir>/scripts/transcript.sh ...` (the base dir is shown
+  when the skill loads). A bare relative `scripts/transcript.sh ...` fails with
+  `No such file or directory` because your cwd is the user's project, not the
+  skill folder; a `cd ~/.claude/... && ...` compound command reads as a different,
+  non-allow-listed command and can prompt. The absolute path avoids both — and the
+  `Bash(*/scripts/transcript.sh:*)` rule keeps it prompt-free.
 
 Net effect: approve the script once (or rely on the frontmatter allow rule) and
 the whole flow — summarize, recall, batch — runs silently.
